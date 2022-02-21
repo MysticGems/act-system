@@ -4,13 +4,13 @@
 // ===========================================================================
 
 integer useActDamage = TRUE;
-integer sameGroupOnly = FALSE;        // Only play with my group
+integer sameGroupOnly = FALSE;      // Only play with my group
 integer peacePrim;                  // Display for useActDamage
 float DB_DENOMINATOR = 32.0;        // This much DB gives 2× protection
 float DODGE_FOCUS_MULT = 2.0;       // Focus multiplier for successful defense
 
 // Values stored in faces:
-//  Face 0: Nutrition, Arousal, 
+//  Face 0: Nutrition, Arousal, TBD
 integer NEEDS = 0;
 //  Face 1: Resiliance, Drive, Insight
 integer RDI = 1;
@@ -26,9 +26,9 @@ integer COMBAT = 6;
 
 // Bitmasks for states (resources.x)
 integer STUNNED_MASK = 0x2;         // ?
-integer RESTRAINED_MASK = 0x4;      // ?
+integer IMMOBILIZE_MASK = 0x4;      // ?
 integer DEFEATED_MASK = 0x8;        // ?
-integer WOUNDED_MASK = 0x10;        // ?
+integer DISABLEED_MASK = 0x10;        // ?
 integer VULNERABLE_MASK = 0x80;     //
 
 // Bitmasks for combat status (defenses.z)
@@ -49,6 +49,7 @@ float damageBuffUntil;
 
 float STUNNED_TIME = 5.0;           // How long to be stunned by excess damage
 float KO_TIME = 60.0;               // How long to be defeated
+float DEFAULT_TURN = 5.0;           // How long a turn lasts
 
 list shield;                        // Shield key, fraction passed through,
                                     // range, expiration time
@@ -101,11 +102,11 @@ handle_command( integer sender, integer signal, string msg, key id )
                         stunnedUntil = llListStatistics( LIST_STAT_MAX,
                             [ stunnedUntil, expires ] );
                     }
-                    if ( ( states & RESTRAINED_MASK ) && expires > 0.1 ) {
+                    if ( ( states & IMMOBILIZE_MASK ) && expires > 0.1 ) {
                         restrainedUntil = llListStatistics( LIST_STAT_MAX,
                             [ restrainedUntil, expires ] );
                     }
-                    if ( ( states & WOUNDED_MASK ) && expires > 0.1 ) {
+                    if ( ( states & DISABLEED_MASK ) && expires > 0.1 ) {
                         woundedUntil = llListStatistics( LIST_STAT_MAX,
                             [ woundedUntil, expires ] );
                     }
@@ -353,10 +354,10 @@ arouse( list effect, key id )
 // Damage flags
 integer DAZED_MASK = 0x1;       // Target may lose all defense bonus
 integer STUN_MASK = 0x2;        // Target becomes unable to act
-integer RESTRAIN_MASK = 0x4;    // Target becomes unable to move
+integer IMMOBILE_MASK = 0x4;    // Target becomes unable to move
 integer KNOCKBACK_MASK = 0x10;  // Target moves away from attacker
 integer THREAT_MASK = 0x20;     // Target switches target to attacker
-integer WOUND_MASK = 0x40;      // Target's recovery reduced
+integer DISABLE_MASK = 0x40;    // Target's recovery reduced
 // integer 0x80                    Unused
 integer SUPER_MASK = 0x100;     // Damage penetrates invulnerability
 
@@ -465,8 +466,8 @@ take_damage( list damage, key id )       // Process taking damage
                         LINK_DELIM ),
                     llGetOwner() );
         }
-        if ( attackFlags & WOUND_MASK ) {
-            statusFlags = statusFlags | WOUNDED_MASK;
+        if ( attackFlags & DISABLE_MASK ) {
+            statusFlags = statusFlags | DISABLEED_MASK;
             woundedUntil = llListStatistics( LIST_STAT_MAX,
                 [ woundedUntil, statusUntil ] );
         }
@@ -475,8 +476,8 @@ take_damage( list damage, key id )       // Process taking damage
             vulnerableUntil = llListStatistics( LIST_STAT_MAX,
                 [ vulnerableUntil, statusUntil ] );
         }
-        if ( attackFlags & RESTRAIN_MASK ) {
-            statusFlags = statusFlags | RESTRAINED_MASK;
+        if ( attackFlags & IMMOBILE_MASK ) {
+            statusFlags = statusFlags | IMMOBILIZE_MASK;
             restrainedUntil = llListStatistics( LIST_STAT_MAX,
                 [ restrainedUntil, statusUntil ] );
         }
@@ -618,23 +619,20 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     integer status = (integer)resources.x;
     float scale = 5.0;
-    //if ( (integer)defenses.z & COMBAT_MASK ) {
-    //    scale = 1.0;
-    //}
 
     // Remove conditions here
     if ( ( status & STUNNED_MASK ) && ( now > stunnedUntil ) ) {
         status = status & ~STUNNED_MASK;
         llMessageLinked( LINK_ROOT, UI_MASK, "unbusy", llGetOwner() );
     }
-    if ( ( status & WOUNDED_MASK ) && ( now > woundedUntil ) ) {
-        status = status & ~WOUNDED_MASK;
+    if ( ( status & DISABLEED_MASK ) && ( now > woundedUntil ) ) {
+        status = status & ~DISABLEED_MASK;
     }
     if ( ( status & VULNERABLE_MASK ) && ( now > vulnerableUntil ) ) {
         status = status & ~VULNERABLE_MASK;
     }
-    if ( ( status & RESTRAINED_MASK ) && ( now > restrainedUntil ) ) {
-        status = status & ~RESTRAINED_MASK;
+    if ( ( status & IMMOBILIZE_MASK ) && ( now > restrainedUntil ) ) {
+        status = status & ~IMMOBILIZE_MASK;
     }
     if ( ( (integer)defenses.z & INVULNERABLE_MASK ) && 
         ( now > invulnerableUntil ) ) 
@@ -649,21 +647,21 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     // Recover attributes
     if ( llVecDist( attributes, baseAttributes ) > 0.1 ) {
-        if ( baseAttributes.x > attributes.x && ( status ^ WOUNDED_MASK )) {
+        if ( baseAttributes.x > attributes.x && ( status ^ DISABLEED_MASK )) {
             attributes.x = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.x, attributes.x + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.x < attributes.x ) {
             attributes.x = llListStatistics( LIST_STAT_MAX,
                 [ baseAttributes.x, attributes.x - ( scale / 5.0 ) ] );
         }
-        if ( baseAttributes.y > attributes.y && ( status ^ WOUNDED_MASK )) {
+        if ( baseAttributes.y > attributes.y && ( status ^ DISABLEED_MASK )) {
             attributes.y = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.y, attributes.y + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.y < attributes.y ) {
             attributes.y = llListStatistics( LIST_STAT_MAX,
                 [ baseAttributes.y, attributes.y - ( scale / 5.0 ) ] );
         }
-        if ( baseAttributes.z > attributes.z && ( status ^ WOUNDED_MASK )) {
+        if ( baseAttributes.z > attributes.z && ( status ^ DISABLEED_MASK )) {
             attributes.z = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.z, attributes.z + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.x < attributes.x ) {
@@ -675,7 +673,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
 
     // Set focus
     float oFocus = resources.z;
-    if ( resources.z < attributes.y && ( status ^ WOUNDED_MASK ) 
+    if ( resources.z < attributes.y && ( status ^ DISABLEED_MASK ) 
         && !( (integer)defenses.z & COMBAT_MASK ) ) {
         resources.z += llListStatistics( LIST_STAT_MAX, 
             [ 0, rec.x * scale ] );
@@ -693,7 +691,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     // Set morale
     if ( attributes.y + attributes.x - resources.y > 0.1 && 
-        ( status ^ WOUNDED_MASK )) 
+        ( status ^ DISABLEED_MASK )) 
     {
         resources.y += llListStatistics( LIST_STAT_MAX,
             [ 0, llFloor( rec.z * scale ) ] );
@@ -703,7 +701,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
     }
     
     if ( rec.y < ( attributes.y + attributes.z ) && 
-        ( status ^ WOUNDED_MASK )) 
+        ( status ^ DISABLEED_MASK )) 
     {
         rec.y += ( attributes.y + attributes.z ) * 0.001 * scale;
         if ( rec.y > ( attributes.y + attributes.z ) ) {
@@ -724,6 +722,12 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     update_resources( <status, (integer)resources.y, (integer)resources.z > );
     llSetTimerEvent( scale );
+}
+
+key turn_request = NULL_KEY;
+get_timer( float turn )
+{
+    turn_request = llReadKeyValue( "Act-turnLength" );
 }
 
 // ===========================================================================
@@ -844,13 +848,13 @@ update_display()
         status += "Stn";
     }
     set_stunned( states & STUNNED_MASK );
-    if ( states & WOUNDED_MASK ) {
+    if ( states & DISABLEED_MASK ) {
         status += "Wnd";
     }
-    if ( states & RESTRAINED_MASK ) {
+    if ( states & IMMOBILIZE_MASK ) {
         status += "Res";
     }
-    set_restrained( states & RESTRAINED_MASK );
+    set_restrained( states & IMMOBILIZE_MASK );
     if ( states & VULNERABLE_MASK ) {
         status += "Vul";
     }
@@ -993,9 +997,26 @@ default
             llRequestPermissions( llGetOwner(), PERMISSION_TAKE_CONTROLS );
             myListen = llListen( myChannel, "", NULL_KEY, "" );
         }
-        llSetTimerEvent( 5.0 );
+        get_timer();
         llWhisper( DEBUG_CHANNEL, llGetScriptName() + " " +
             (string)llGetUsedMemory() + " kb used" );
+    }
+    
+    dataserver( key id, string value )
+    {
+        error_value = (integer)llGetSubString(value, 0, 0);
+        data = llGetSubString(value, 2, -1);
+        if ( id == turn_request ) {
+            if !( error_value ) {
+                turn_length = (float)value;
+                llSetTimerEvent( turn_length );
+            } else if ( error_value == XP_ERROR_THROTTLED ){
+                llSleep(5.0);
+                get_timer();
+            } else {
+                llSetTimerEvent( DEFAULT_TURN )
+            }
+        }
     }
     
     attach( key id )
@@ -1004,6 +1025,7 @@ default
         {
             llRequestPermissions( id, PERMISSION_TAKE_CONTROLS );
             set_target( NULL_KEY );
+            get_timer();
         }
     }
     
@@ -1135,7 +1157,7 @@ state defeated
         llSetLinkPrimitiveParams( statesPrim, 
             [ PRIM_TEXT, text, <1.0, 0.625, 0.625>, 1.0 ] );
         vector smf = retrieve( SMF );
-        integer states = (integer)smf.x | STUNNED_MASK | RESTRAINED_MASK | 
+        integer states = (integer)smf.x | STUNNED_MASK | IMMOBILIZE_MASK | 
             DEFEATED_MASK;
         store( <states, 1.0, 1.0>, SMF );
         
