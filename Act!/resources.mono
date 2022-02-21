@@ -47,8 +47,11 @@ float lastDodge;
 float invulnerableUntil;
 float damageBuffUntil;
 
-float STUNNED_TIME = 5.0;           // How long to be stunned by excess damage
-float KO_TIME = 60.0;               // How long to be defeated
+// Timing (experience-specific)
+float turn_length = 0.0;            // How long a turn lasts
+float defeated_time = 0.0;          // How long to be defeated
+
+float DEFEATED_TIME = 60.0;               // How long to be defeated
 float DEFAULT_TURN = 5.0;           // How long a turn lasts
 
 list shield;                        // Shield key, fraction passed through,
@@ -1008,13 +1011,16 @@ default
         data = llGetSubString(value, 2, -1);
         if ( id == turn_request ) {
             if !( error_value ) {
-                turn_length = (float)value;
+                turn_length = (float)llJsonGetValue( data, ["turn"] );
+                defeated_time = (float)llJsonGetValue( data, ["defeated"] );
                 llSetTimerEvent( turn_length );
             } else if ( error_value == XP_ERROR_THROTTLED ){
                 llSleep(5.0);
                 get_timer();
             } else {
                 llSetTimerEvent( DEFAULT_TURN )
+                turn_length = DEFAULT_TURN;
+                defeated_time = DEFEATED_TIME;
             }
         }
     }
@@ -1135,13 +1141,18 @@ default
     {
         resting_recovery();
     }
+    
+    state_exit()
+    {
+        llSetTimerEvent(0.0);
+    }
 }
 
 state defeated
 {
     state_entry()
     {
-        llSetTimerEvent( KO_TIME );
+        llSetTimerEvent( defeated_time );
         set_stunned( TRUE );
         set_restrained( TRUE );
         string text = "Defeated\n ";
@@ -1162,7 +1173,7 @@ state defeated
         store( <states, 1.0, 1.0>, SMF );
         
         llWhisper( power_channel( llGetOwner() ),
-            llDumpList2String( [ "play", "defeated", KO_TIME ], CHAT_DELIM ) );
+            llDumpList2String( [ "play", "defeated", DEFEATED_TIME ], CHAT_DELIM ) );
     }
         
     link_message( integer sender, integer signal, string msg, key id )
@@ -1191,7 +1202,7 @@ state defeated
     
     state_exit()
     {
-        llSetTimerEvent( 0. );
+        llSetTimerEvent( 0.0 );
         
         llSetLinkPrimitiveParams( statesPrim, 
             [ PRIM_TEXT, "", <1.0, 0.625, 0.625>, 1.0 ] );
