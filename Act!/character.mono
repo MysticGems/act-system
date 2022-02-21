@@ -4,7 +4,7 @@
 // ===========================================================================
 
 string charName = "";                   // Who am I?
-string charKey = NULL_KEY;              // Character key
+string charKey = NULL_KEY;     // Character key
 
 string defaultCharacter = "Green Lantern";
 integer DEFAULT_LEVEL = 64;
@@ -326,64 +326,19 @@ announce( string text, integer public )
 }
 
 // ------------------------------------------------------------------------
-// Database access
-string DATA_URL = "http://mysticgems.geographic.net/act/auth.php";
-string LICENSE_URL = "http://mysticgems.geographic.net/act/subscribe.php";
-string PASSWORD = "ylADRIezoA1roeQiuDoUHl0douFro1Cr1e6iaSwi";
-string HTTP_DELIM = "|";
+// Experience keys access
 
-key namesID = NULL_KEY;                 // Get character names
-key charKeyID = NULL_KEY;               // Get character key
-key charID = NULL_KEY;                  // Character sheet request
+key charID = NULL_KEY;                  // Character sheet not yet requested
+string DATA_DELIM = "§";
 
-key put_data(key id, string where, string data, integer verbose)
+key put_data(string id, string value, string original)
 {
     llSleep( 1.0 );
-    string args;
-    args += "?key=" + llEscapeURL(id) + "&separator=" 
-        + llEscapeURL(HTTP_DELIM);
-    args += "&where=" + llEscapeURL(where);
-    args += "&notes=" + llEscapeURL(data);
-    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
-    return llHTTPRequest(DATA_URL + args,
-        [HTTP_METHOD,"POST",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
-        "");
-}
-
-key get_license( key id )
-{
-    string args;
-    //llOwnerSay( llGetScriptName() + " get license for " + (string)id +
-    //    " " + llKey2Name( id ) );
-    args += "?key=" + llEscapeURL(id);
-    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
-    return llHTTPRequest(LICENSE_URL + args,
-        [HTTP_METHOD,"GET",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
-        "");
-}
-        
-key get_data(key id, list fields, integer verbose)
-{
-    llSleep( 1.0 );
-    string args;
-    //llOwnerSay( llGetScriptName() + " get data for " + (string)id +
-    //    " " + llKey2Name( id ) );
-    args += "?key=" + llEscapeURL(id) + "&separator=" 
-        + llEscapeURL(HTTP_DELIM);
-    args += "&fields=" + llEscapeURL( llDumpList2String( fields, HTTP_DELIM ) )
-        + "&verbose=" + (string)verbose;
-    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
-    return llHTTPRequest(DATA_URL + args,
-        [HTTP_METHOD,"GET",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
-        "");
-}
-
-integer date2int( string date )
-{
-    list parsed = llParseString2List( date, [ "-", "/", ":" ], [] );
-    return (integer)(llList2String( parsed, 0 )  
-        + llList2String( parsed, 1 ) 
-        + llList2String( parsed, 2 ) );
+    integer verify = FALSE;
+    if ( original ) {
+        integer verify = TRUE;
+    }
+    return llUpdateKeyValue( id, value, verify, original );
 }
 
 // ===========================================================================
@@ -420,26 +375,20 @@ default // Setup
         }
         //llOwnerSay( llGetScriptName() + " starting; " + (string)llGetFreeMemory()
         //    + " bytes free." );
-        if ( llGetAttached() ) {
+        if ( llGetAttached() && llAgentInExperience( llGetOwner() ) ) {
             if ( charKey == NULL_KEY ) {
                 if ( defaultLicense != NULL_KEY ) {
                     charName = defaultCharacter;
-                    charKey = defaultLicense;
+                    charKey = (string)defaultLicense + "-Act";
                     charLevel = DEFAULT_LEVEL;
-                    charID = get_data( charKey, 
-                        [ "attributes", "traits", "skills" ], TRUE );
+                    charID = llReadKeyValue( charKey );
                 } else {
                     // Start polling for default license
                     llSetTimerEvent( 5.0 );
                 }
-            } else if ( charKey == llGetKey() ) {
-                namesID = get_license( llGetOwner() );
             } else {
-                list params = llGetLinkPrimitiveParams( LINK_THIS,
-                    [ PRIM_POINT_LIGHT ] );
-                charLevel = llList2Float( params, 2 ) * 0xFF;
-                charID = get_data( charKey, 
-                    [ "attributes", "traits", "skills" ], TRUE );
+                charKey = (string)llGetOwner() + "-Act";
+                charID = llReadKeyValue( charKey );
             }
         }
     }
@@ -454,86 +403,14 @@ default // Setup
         }
     }
     
-    http_response( key id, integer status, list metadata, string body )
+    dataserver( key id, string body )
     {
-        // Make sure this is for me
-        if ( !( id == namesID || id == charID || id == charKeyID) ) return;
+        if ( !( id == charID ) ) return;
         
         body = llStringTrim( body, STRING_TRIM );
-
-        // Handle failures to retrieve character
-        if ( status != 200 ) {
-            if ( attributes ) {
-                llOwnerSay( "ERROR " + (string)status 
-                    + ": Cannot connect to server; using cached character data." );
-                store_all_values();
-                state active;
-            } else {
-                llOwnerSay( "ERROR " + (string)status
-                    + ": Cannot connect to server and no cached data available." );
-                state error;
-            }
-        }
-        if ( id == namesID ) {
-            list menuItems = [ llDumpList2String( [ "act!", "char", "default" ],
-                LINK_DELIM ) ];
-            list menuLabels = [ "DEFAULT" ];
-            if ( body != "NO_DATA" ) {
-                list parsed = llParseString2List( body, [HTTP_DELIM], [] );
-                integer c = llGetListLength( parsed );
-                string today = llGetSubString( llGetTimestamp(), 0, 9 );
-                string expires;
-                
-                if ( c > 2 ) {
-                    integer i = 0;
-                    while ( i < c ) {
-                        expires = llGetSubString( llList2String( parsed, i + 4 ), 
-                            0, 9 );
-                        if ( date2int(expires) > date2int(today) &&
-                            llList2String( parsed, i+1 ) != BLANK_CHARACTER )
-                        {
-                            menuLabels += [ llList2String( parsed, i+1 ) ];
-                            menuItems += [ llDumpList2String( [ "act!", "char"] +
-                                llList2List( parsed, i+1, i+3 ), LINK_DELIM ) ];
-                        }
-                        i += 5;
-                    }
-                    if ( llGetListLength(menuItems) > 1 ) {
-                        llMessageLinked( menuPrim, RP_MASK,
-                            llDumpList2String( [ "menu", "Select Character",
-                                llList2CSV(menuLabels),
-                                llList2CSV(menuItems)
-                                ], LINK_DELIM ),
-                            llGetOwner() );
-                    } else {
-                        llMessageLinked( LINK_THIS, RP_MASK, llList2String(
-                            menuItems, 0 ), llGetKey() );
-                    }
-                } else {
-                    charName = llList2String( parsed, 0 );
-                    charKey = (key)llList2String( parsed, 1 );
-                    charID = get_data( charKey, 
-                        [ "attributes", "traits", "skills" ], TRUE );
-                }
-            } else {
-                charName = defaultCharacter;
-                charKey = defaultLicense;
-                charID = get_data( charKey, 
-                    [ "attributes", "traits", "skills" ], TRUE );
-            }
-        }
-        if ( id == charKeyID ) {
-            charKey = (key)llList2String( llParseString2List( 
-                body, [HTTP_DELIM], [] ), 1 );
-            if ( charKey == NULL_KEY ) {
-                charKeyID = get_data( llGetOwner(), [ charName ], TRUE );
-            } else {
-                charID = get_data( charKey, 
-                    [ "attributes", "traits", "skills" ], TRUE );
-            }
-        }
+        
         if ( id == charID ) {
-            list data = llParseString2List( body, [ HTTP_DELIM ], [] );
+            list data = llParseString2List( body, [ DATA_DELIM ], [] );
             integer i = llListFindList( data, ["attributes"] );
             if ( i > -1 ) {
                 attributes = (vector)llList2String( data, i + 1 );
@@ -566,7 +443,7 @@ default // Setup
             }
             store_all_values();
             state active;
-        }
+        }        
     }
     
     link_message( integer sender, integer signal, string msg, key id )
@@ -591,8 +468,7 @@ default // Setup
                         charKey = (key)llList2String( parsed, 3 );
                         charLevel = (float)llList2String( parsed, 4 );
                     }
-                    charID = get_data( charKey, 
-                        [ "attributes", "traits", "skills" ], TRUE );
+                    charID = llReadKeyValue( charKey );
                 } else if ( cmd == "a!int" ) {
                     if ( defaultLicense == NULL_KEY && 
                         llGetOwnerKey( id ) == llGetOwner() ) 
@@ -603,8 +479,7 @@ default // Setup
                             charName = defaultCharacter;
                             charKey = defaultLicense;
                             charLevel = DEFAULT_LEVEL;
-                            charID = get_data( charKey, 
-                                [ "attributes", "traits", "skills" ], TRUE );
+                            charID = llReadKeyValue( charKey );
                         }
                     }
                     llSetTimerEvent( 0. );
