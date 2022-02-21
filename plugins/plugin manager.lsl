@@ -261,5 +261,3 @@ state diag
     }
 }
 
-// Copyright ©2011 Jack Abraham and player, all rights reserved
-// Contact Guardian Karu in Second Life for distribution rights

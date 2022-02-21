@@ -369,5 +369,4 @@ default
         }
     }
 }
-// Copyright ©2012 Jack Abraham and player, all rights reserved
-// Contact Guardian Karu in Second Life for distribution rights
+
