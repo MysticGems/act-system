@@ -1,0 +1,756 @@
+// ===========================================================================
+// Character Sheet                                                           \
+// By Jack Abraham                                                        \__ 
+// ===========================================================================
+
+string charName = "";                   // Who am I?
+string charKey = NULL_KEY;              // Character key
+
+string defaultCharacter = "Green Lantern";
+integer DEFAULT_LEVEL = 64;
+key defaultLicense = "4513d163-9eed-360a-7e8d-413d6a70be07";
+
+string BLANK_CHARACTER = "( Unused )";
+string RESOURCE_SCRIPT = "resources.lsl";
+
+float charLevel = 64.0;                 // Attribute scale, max 128
+float TRAIT_COST = 0.025;               // Cost of a Trait
+float SKILL_COST = 0.025;               // Cost of Skill +1.0
+
+// Values stored in faces:
+//  Face 0: Nutrition, Arousal, 
+integer NEEDS = 0;
+//  Face 1: Resilience, Drive, Insight
+//  Also stored in color of PRIM_POINT_LIGHT for easy reset after buff/debuff
+integer RDI = 1;
+//  Face 2: Injury status conditions, Morale, Focus
+integer SMF = 2;
+//  Face 3: Defense Bonus, Damage Resistance, Combat status conditions
+integer DEFENSES = 3;
+//  Face 4: Displayed face toward user; do not use
+//  Face 5: Power recovery rate, Max Power, Resolve recovery rate
+integer RECOVERY = 5;
+// Face 6: Damage modifier, DB modifier, Attack flags
+// License key in texture field
+integer COMBAT = 6;
+integer CHARKEY = 6;
+
+vector attributes;
+list traits = [];
+list skills = [];
+
+integer BROADCAST_MASK      = 0xFFF00000;
+integer RP_MASK             = 0x4000000;
+// integer OBJ_MASK            = 0x2000000;
+
+integer detached;                   // Time taken off
+
+// =========================================================================
+// Task roll
+// =========================================================================
+
+string FAIL = "FAIL";
+string SUCCESS = "SUCCESS";
+
+// Action format:
+//       Key of object to reply to (owner for internal calls)
+//       |            Signal to send with success/failure
+//       |            |   Attribute rolled against
+//       |            |   |         Skill to modify attribute*
+//       |            |   |         |     Trait required to attempt*
+//       |            |   |         |     |    Modifier to probability*
+//       |            |   |         |     |     |
+// a!act:reply-to-key:000:attribute:skill:trait:0.00
+//
+// * Optional field, but delimiters for prior fields required
+
+action( integer sender, string msg )
+{
+    list params = llParseStringKeepNulls( msg, 
+        [ LINK_DELIM, ACT_DELIM ], [] );
+    params = llDeleteSubList( params, 0, 1 );
+    string trait = "";
+    string skill = "";
+    float mod = 0.0;
+    float numberOfParams = llGetListLength( params );
+    if ( numberOfParams > 3 ) {
+        skill = llList2String( params, 3 );
+    }
+    if ( numberOfParams > 4 ) {
+        trait = llList2String( params, 4 );
+    }
+    if ( numberOfParams > 5 ) {
+        mod = (float)llList2String( params, 5 );
+    }
+    
+    if ( llList2String( params, 0 ) == (string)llGetOwner() ) {
+        llMessageLinked( sender, (integer)llList2String( params, 1 ), 
+            llDumpList2String( 
+                [ action_roll( llList2String( params, 2 ), skill, trait, mod ) ], 
+                LINK_DELIM ), llGetOwner() );
+    } else {
+        send( key2channel( (key)llList2String( params, 0 ) ), 
+            (integer)llList2String( params, 1), 
+            [ action_roll( llList2String( params, 2 ), skill, trait, mod ) ] );
+    }
+}
+
+// Trait check:
+//       Key of object to reply to (owner for internal calls)
+//       |            Signal to send with success or failure
+//       |            |   Trait to check
+//       |            |   |
+// a!trt:reply-to-key:000:trait
+
+trait( integer sender, string trait )
+{
+    list params = llParseStringKeepNulls( trait, [ ACT_DELIM ], [] );
+    params = llDeleteSubList( params, 0, 0 );
+    string result = FAIL;
+    if ( have_trait( llList2String( params, 2 ) ) ) {
+        result = SUCCESS;
+    }
+    if ( llList2String( params, 0 ) == (string)llGetOwner() ) {
+        llMessageLinked( sender, (integer)llList2String( params, 1), 
+            llDumpList2String( [ result ], LINK_DELIM ), llGetOwner() );
+    } else {
+        send( key2channel( (key)llList2String( params, 0 ) ), 
+            (integer)llList2String( params, 1), 
+            [ result ] );
+    }
+}
+
+string action_roll( string attribute, string skill, string trait, float modifier )
+{
+    // Sends SIG for success; nothing for failure.
+    attribute = llToLower( attribute );
+    trait = llToLower( trait );
+    skill = llToLower( skill );
+    vector allAttributes = retrieve( RDI );
+    integer attrib;
+    if ( attribute == "resilience" ) attrib = (integer)allAttributes.x;
+    else if ( attribute == "drive" ) attrib = (integer)allAttributes.y;
+    else if ( attribute == "insight" ) attrib = (integer)allAttributes.z;
+    else return FAIL;
+
+    // Trait is required; fail if you don't have it.
+        
+    if ( trait ) {
+        string mod = llGetSubString( trait, 0 , 0 );
+        if ( mod == "!" ) {
+            if ( have_trait( llGetSubString( trait, 1, -1 ) ) ) {
+                // Attempt roll only if you do not have the trait
+                return SUCCESS;
+            }
+        }
+        if ( !have_trait( trait ) ) {
+            return FAIL;
+        }
+    }
+
+    if ( skill ) {
+        integer i = llListFindList( skills, [ skill ] );
+        if ( i > -1 ) {
+            modifier += llList2Float( skills, i + 1 );
+        }
+    }
+    
+    integer roll = (integer)llFrand( 65.0 );
+    // llOwnerSay( "Success chance: " 
+    //     + (string)llRound( (float)attrib * ( 1.0 + modifier ) ) );
+    // llOwnerSay( "Rolled " + (string)roll );
+    if ( roll < llRound( (float)attrib * ( 1.0 + modifier ) ) ) {
+        return SUCCESS;
+    }
+    return FAIL;
+}
+
+integer have_trait( string trait ) 
+{
+    list check = llParseString2List( trait, ["|"], [] );
+    integer c = llGetListLength( check );
+    integer i;
+    for ( i=0; i<c; i++ ) {
+        if ( llListFindList( traits, [ llList2String(check, i) ] ) > -1 ) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+store_all_values()
+{
+    attributes = llVecNorm( attributes ) * charLevel;
+    attributes *= 1.0 - 
+        ( TRAIT_COST * (float)llGetListLength( traits )) -
+        ( SKILL_COST * (float)( llListStatistics( LIST_STAT_SUM, skills ) ));
+    attributes = <llRound( attributes.x ),
+        llRound( attributes.y ),
+        llRound( attributes.z )>;
+    store( attributes, RDI );
+    llSetLinkPrimitiveParamsFast( LINK_THIS, [ PRIM_POINT_LIGHT, TRUE,
+        attributes / 0xFF, charLevel / 0xFF, 0.01, 1.0 ] );
+    store( ZERO_VECTOR, SMF );
+    store( <attributes.x / 25.0,
+        ( attributes.y + attributes.z ),
+        attributes.x / 50.0>, RECOVERY );
+    store( <0.0, 0.0, 0.0>, DEFENSES );
+    llSetObjectDesc( charName );
+    llSetText( llList2CSV( traits ), ZERO_VECTOR, 0.0 );
+}
+
+// =========================================================================
+// Output functions
+// =========================================================================
+
+string CHAT_DELIM = "|";
+string LINK_DELIM = "§";
+string ACT_DELIM = ":";
+
+menu( string title, list items, list commands )
+{
+    llMessageLinked( menuPrim, RP_MASK, 
+        llDumpList2String( [ "menu", 
+            title, 
+            llList2CSV( items ), 
+            llList2CSV( commands ) ],
+            LINK_DELIM ),
+        llGetOwner() );
+}
+
+list get_link_numbers_for_names(list namesToLookFor)
+{
+    list linkNumbers = namesToLookFor;
+    integer f = llGetNumberOfPrims();
+    integer pos = -1;
+    while (--f >= 0) {
+        pos = llListFindList(namesToLookFor, [llGetLinkName(f)]);
+        if (pos > -1) {
+            linkNumbers = llListReplaceList(linkNumbers, [f], pos, pos);
+        }
+    }
+    return linkNumbers;
+}
+
+send( integer dest, integer sig, list message ) {
+    llSay( dest, llDumpList2String( [ sig ] + message, ACT_DELIM ) );
+}
+
+integer teamPrim;
+
+// Return a list of team members
+list get_team()
+{
+    list team = llCSV2List( 
+        llList2String( 
+            llGetLinkPrimitiveParams( teamPrim, [ PRIM_TEXT ] ),
+            0 )
+        );
+    integer c = llGetListLength( team );
+    while ( --c >= 0 ) {
+        key member = (key)llList2String( team, c );
+        team = llListReplaceList( team, [ member ], c, c );
+    }
+    return team;
+}
+
+// Send a team-related message to all team members
+send_to_team( list message )
+{
+    string msg = llDumpList2String( ["act!", "team"] + message, ACT_DELIM );
+    list team = get_team();
+    integer c = llGetListLength( team );
+    key member;
+    while ( c-- >= 0 ) {
+        member = llList2Key( team, c );
+        llRegionSay( key2channel( member ),
+            (string)member + ACT_DELIM + msg );
+    }
+}
+
+integer menuPrim = LINK_SET;            // Where's the menu?
+
+integer key2channel( key who ) {
+    return -1 * (integer)( "0x" + llGetSubString( (string)who, -12, -5 ) );
+}
+
+sheet_to_chat()
+{
+    string output = "/me - " + charName + " - Level " 
+        + (string)llRound(charLevel ) 
+        + "\n";
+    vector rdi = retrieve( RDI );
+    vector smf = retrieve( SMF );
+    vector def = retrieve( DEFENSES );
+    vector rec = retrieve ( RECOVERY );
+    output += "[Resilience: " + (string)llRound( rdi.x / 0.64 )
+        + "%] [Drive: " + (string)llRound( rdi.y / 0.64 )
+        + "%] [Insight: " + (string)llRound( rdi.z / 0.64 ) + "%]";
+    output += "\n[Morale: " + (string)llRound( smf.y )
+        + "/" + (string)llRound( rdi.y + rdi.x )
+        + "] [Focus: " + (string)llRound(smf.z ) + "/"
+        + (string)llRound( rdi.y + rdi.z ) + "]"
+        + " [Defense Bonus: " + (string)( llRound(def.x) ) + "]";
+    if ( traits != [] ) {
+        output += "\n[Traits] " + llList2CSV( traits );
+    }
+    if ( skills != [] ) {
+        list skillList = [];
+        integer i = 0;
+        integer c = llGetListLength( skills );
+        do {
+            float val = llList2Float( skills, i + 1 ) * 100.0;
+            string skill = llList2String( skills, i ) + " ";
+            if ( val >= 0.0 ) {
+                skill += "+";
+            }
+            skill += (string)llRound( val );
+            skillList += skill + "%";
+            i += 2;
+        } while ( i < c );
+        output += "\n[Skills] " + llList2CSV( skillList );
+    }
+    announce( output, FALSE );
+}
+
+announce( string text, integer public )
+{
+    string primName = llGetObjectName();
+    llSetObjectName( llGetDisplayName( llGetOwner() ) );
+    if ( public ) {
+        llSay( 0, text );
+    } else {
+        llOwnerSay( text );
+    }
+    llSetObjectName( primName );
+}
+
+// ------------------------------------------------------------------------
+// Database access
+string DATA_URL = "http://mysticgems.geographic.net/act/auth.php";
+string LICENSE_URL = "http://mysticgems.geographic.net/act/subscribe.php";
+string PASSWORD = "ylADRIezoA1roeQiuDoUHl0douFro1Cr1e6iaSwi";
+string HTTP_DELIM = "|";
+
+key namesID = NULL_KEY;                 // Get character names
+key charKeyID = NULL_KEY;               // Get character key
+key charID = NULL_KEY;                  // Character sheet request
+
+key put_data(key id, string where, string data, integer verbose)
+{
+    llSleep( 1.0 );
+    string args;
+    args += "?key=" + llEscapeURL(id) + "&separator=" 
+        + llEscapeURL(HTTP_DELIM);
+    args += "&where=" + llEscapeURL(where);
+    args += "&notes=" + llEscapeURL(data);
+    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
+    return llHTTPRequest(DATA_URL + args,
+        [HTTP_METHOD,"POST",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
+        "");
+}
+
+key get_license( key id )
+{
+    string args;
+    //llOwnerSay( llGetScriptName() + " get license for " + (string)id +
+    //    " " + llKey2Name( id ) );
+    args += "?key=" + llEscapeURL(id);
+    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
+    return llHTTPRequest(LICENSE_URL + args,
+        [HTTP_METHOD,"GET",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
+        "");
+}
+        
+key get_data(key id, list fields, integer verbose)
+{
+    llSleep( 1.0 );
+    string args;
+    //llOwnerSay( llGetScriptName() + " get data for " + (string)id +
+    //    " " + llKey2Name( id ) );
+    args += "?key=" + llEscapeURL(id) + "&separator=" 
+        + llEscapeURL(HTTP_DELIM);
+    args += "&fields=" + llEscapeURL( llDumpList2String( fields, HTTP_DELIM ) )
+        + "&verbose=" + (string)verbose;
+    args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
+    return llHTTPRequest(DATA_URL + args,
+        [HTTP_METHOD,"GET",HTTP_MIMETYPE,"application/x-www-form-urlencoded"],
+        "");
+}
+
+integer date2int( string date )
+{
+    list parsed = llParseString2List( date, [ "-", "/", ":" ], [] );
+    return (integer)(llList2String( parsed, 0 )  
+        + llList2String( parsed, 1 ) 
+        + llList2String( parsed, 2 ) );
+}
+
+// ===========================================================================
+// Functions to store/retrieve attribute values
+
+store( vector store, integer face )
+{
+    store /= 0xFF;
+    if ( llGetColor( face ) != store ) {
+        llSetColor( store, face );
+    }
+}
+
+vector retrieve( integer face )
+{
+    return llGetColor( face ) * 0xFF;
+}
+
+// ===========================================================================
+
+default // Setup
+{
+    state_entry()
+    {
+        list prims = get_link_numbers_for_names(
+            [ "menu", "combat" ] );
+        menuPrim = llList2Integer( prims, 0 );
+        teamPrim = llList2Integer( prims, 1 );
+        if ( llGetNumberOfSides() < COMBAT + 1 ) {
+            llSay( DEBUG_CHANNEL, 
+                "Insufficient prim faces for data storage; need " 
+                + (string)COMBAT + ".");
+            state error;
+        }
+        //llOwnerSay( llGetScriptName() + " starting; " + (string)llGetFreeMemory()
+        //    + " bytes free." );
+        if ( llGetAttached() ) {
+            if ( charKey == NULL_KEY ) {
+                if ( defaultLicense != NULL_KEY ) {
+                    charName = defaultCharacter;
+                    charKey = defaultLicense;
+                    charLevel = DEFAULT_LEVEL;
+                    charID = get_data( charKey, 
+                        [ "attributes", "traits", "skills" ], TRUE );
+                } else {
+                    // Start polling for default license
+                    llSetTimerEvent( 5.0 );
+                }
+            } else if ( charKey == llGetKey() ) {
+                namesID = get_license( llGetOwner() );
+            } else {
+                list params = llGetLinkPrimitiveParams( LINK_THIS,
+                    [ PRIM_POINT_LIGHT ] );
+                charLevel = llList2Float( params, 2 ) * 0xFF;
+                charID = get_data( charKey, 
+                    [ "attributes", "traits", "skills" ], TRUE );
+            }
+        }
+    }
+            
+    timer()
+    {
+        if ( defaultLicense == NULL_KEY ) {
+            llWhisper( key2channel( llGetOwner() ), llDumpList2String(
+                [ llGetOwner(), "a?int" ], ACT_DELIM ) );
+        } else {
+            llSetTimerEvent( 0. );
+        }
+    }
+    
+    http_response( key id, integer status, list metadata, string body )
+    {
+        // Make sure this is for me
+        if ( !( id == namesID || id == charID || id == charKeyID) ) return;
+        
+        body = llStringTrim( body, STRING_TRIM );
+
+        // Handle failures to retrieve character
+        if ( status != 200 ) {
+            if ( attributes ) {
+                llOwnerSay( "ERROR " + (string)status 
+                    + ": Cannot connect to server; using cached character data." );
+                store_all_values();
+                state active;
+            } else {
+                llOwnerSay( "ERROR " + (string)status
+                    + ": Cannot connect to server and no cached data available." );
+                state error;
+            }
+        }
+        if ( id == namesID ) {
+            list menuItems = [ llDumpList2String( [ "act!", "char", "default" ],
+                LINK_DELIM ) ];
+            list menuLabels = [ "DEFAULT" ];
+            if ( body != "NO_DATA" ) {
+                list parsed = llParseString2List( body, [HTTP_DELIM], [] );
+                integer c = llGetListLength( parsed );
+                string today = llGetSubString( llGetTimestamp(), 0, 9 );
+                string expires;
+                
+                if ( c > 2 ) {
+                    integer i = 0;
+                    while ( i < c ) {
+                        expires = llGetSubString( llList2String( parsed, i + 4 ), 
+                            0, 9 );
+                        if ( date2int(expires) > date2int(today) &&
+                            llList2String( parsed, i+1 ) != BLANK_CHARACTER )
+                        {
+                            menuLabels += [ llList2String( parsed, i+1 ) ];
+                            menuItems += [ llDumpList2String( [ "act!", "char"] +
+                                llList2List( parsed, i+1, i+3 ), LINK_DELIM ) ];
+                        }
+                        i += 5;
+                    }
+                    if ( llGetListLength(menuItems) > 1 ) {
+                        llMessageLinked( menuPrim, RP_MASK,
+                            llDumpList2String( [ "menu", "Select Character",
+                                llList2CSV(menuLabels),
+                                llList2CSV(menuItems)
+                                ], LINK_DELIM ),
+                            llGetOwner() );
+                    } else {
+                        llMessageLinked( LINK_THIS, RP_MASK, llList2String(
+                            menuItems, 0 ), llGetKey() );
+                    }
+                } else {
+                    charName = llList2String( parsed, 0 );
+                    charKey = (key)llList2String( parsed, 1 );
+                    charID = get_data( charKey, 
+                        [ "attributes", "traits", "skills" ], TRUE );
+                }
+            } else {
+                charName = defaultCharacter;
+                charKey = defaultLicense;
+                charID = get_data( charKey, 
+                    [ "attributes", "traits", "skills" ], TRUE );
+            }
+        }
+        if ( id == charKeyID ) {
+            charKey = (key)llList2String( llParseString2List( 
+                body, [HTTP_DELIM], [] ), 1 );
+            if ( charKey == NULL_KEY ) {
+                charKeyID = get_data( llGetOwner(), [ charName ], TRUE );
+            } else {
+                charID = get_data( charKey, 
+                    [ "attributes", "traits", "skills" ], TRUE );
+            }
+        }
+        if ( id == charID ) {
+            list data = llParseString2List( body, [ HTTP_DELIM ], [] );
+            integer i = llListFindList( data, ["attributes"] );
+            if ( i > -1 ) {
+                attributes = (vector)llList2String( data, i + 1 );
+            }
+            
+            i = llListFindList( data, ["traits"] );
+            if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
+                traits = llParseString2List( llList2String( data, i+1 ),
+                    [ "^" ], [] );
+            } else {
+                traits = [];
+            }
+            
+            i = llListFindList( data, ["skills"] );
+            if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
+                skills = llParseString2List( llList2String( data, i+1 ),
+                    [ "^" ], [] );
+                integer c = 1;
+                integer l = llGetListLength( skills );
+                float val;
+                while ( c < l ) {
+                    val = (float)llList2String( skills, c );
+                    if ( val != 0.0 ) {
+                        skills = llListReplaceList( skills, [val], c, c );
+                    }
+                    c += 2;
+                }
+            } else {
+                skills = [];
+            }
+            store_all_values();
+            state active;
+        }
+    }
+    
+    link_message( integer sender, integer signal, string msg, key id )
+    {
+        if ( signal & RP_MASK ) {
+            
+            string cmd = llGetSubString( msg, 0, 3 );
+    
+            if ( cmd == "rset" ) {
+                llResetScript();
+            } else if ( cmd == "act!" ) {
+                list parsed = llParseString2List( msg, 
+                    [ LINK_DELIM, ACT_DELIM ], [] );
+                cmd = llList2String( parsed, 1 );
+                if ( cmd == "char" ) {
+                    charName = llList2String( parsed, 2 );
+                    if ( charName == "default" ) {
+                        charName = defaultCharacter;
+                        charKey = defaultLicense;
+                        charLevel = DEFAULT_LEVEL;
+                    } else {
+                        charKey = (key)llList2String( parsed, 3 );
+                        charLevel = (float)llList2String( parsed, 4 );
+                    }
+                    charID = get_data( charKey, 
+                        [ "attributes", "traits", "skills" ], TRUE );
+                } else if ( cmd == "a!int" ) {
+                    if ( defaultLicense == NULL_KEY && 
+                        llGetOwnerKey( id ) == llGetOwner() ) 
+                    {
+                        defaultCharacter = llList2String( parsed, 2 );
+                        defaultLicense = (key)llList2String( parsed, 3 );
+                        if ( charKey == NULL_KEY ) {
+                            charName = defaultCharacter;
+                            charKey = defaultLicense;
+                            charLevel = DEFAULT_LEVEL;
+                            charID = get_data( charKey, 
+                                [ "attributes", "traits", "skills" ], TRUE );
+                        }
+                    }
+                    llSetTimerEvent( 0. );
+                } else {
+                    llResetScript();
+                }
+            }
+        }
+    }
+}
+
+state error
+{
+    state_entry()
+    {
+        llOwnerSay( "/me encountered a problem reading your character sheet." );
+    }
+    
+    on_rez( integer p )
+    {
+        llResetScript();
+    }
+    
+    changed( integer change )
+    {
+        llResetScript();
+    }
+    
+    link_message( integer sender, integer signal, string msg, key id )
+    {
+        if ( signal & RP_MASK ) {
+            string cmd = llGetSubString( msg, 0, 3 );
+            
+            if ( cmd == "rset" ) {
+                llResetScript();
+            } else if ( cmd == "act!" ) {
+                llResetScript();
+            } else if ( cmd == "xxxx" ) {
+                if ( id == llGetLinkKey( 2 ) ) {
+                    integer c = llGetInventoryNumber( INVENTORY_ALL );
+                    string name;
+                    string this = llGetScriptName();
+                    while ( c-- ) {
+                        name = llGetInventoryName( INVENTORY_ALL, c );
+                        if ( name != this ) {
+                            llRemoveInventory( name );
+                        }
+                    }
+                    llRemoveInventory( llGetScriptName() );
+                }
+            }
+        }
+    }
+}
+
+// ===========================================================================
+
+state active
+{
+    state_entry()
+    {
+        //llWhisper( DEBUG_CHANNEL, "Character sheet active; " 
+        //    + (string)llGetFreeMemory()
+        //    + " bytes free." );
+        sheet_to_chat();
+        if ( llGetInventoryType( RESOURCE_SCRIPT ) == INVENTORY_SCRIPT ) {
+            llResetOtherScript( RESOURCE_SCRIPT );
+        }
+        llMessageLinked( LINK_ALL_OTHERS, BROADCAST_MASK, "char", charKey );
+    }
+
+    link_message( integer sender, integer signal, string msg, key id )
+    {
+        if ( signal & RP_MASK ) {
+            string cmd = llToLower( llGetSubString( msg, 0, 3 ) );
+            
+            if ( cmd == "act!" ) {
+                list parsed = llParseStringKeepNulls( msg, 
+                    [ LINK_DELIM, ACT_DELIM ], [] );
+                cmd = llList2String( parsed, 1 );
+                
+                // llOwnerSay( "\"" + cmd + "\"" );
+                
+                if ( cmd == "char" ) {
+                    llSetObjectDesc( defaultCharacter );
+                    charKey = llGetKey();
+                    llSay( 0, "Character sheet reload by " +
+                        llGetDisplayName(llGetOwner()) + "." ); 
+                    state default;
+                } else if ( cmd == "stat" ) {
+                    sheet_to_chat();
+                } else if ( cmd == "a!act" ) {
+                    action( sender, msg );
+                } else if ( cmd == "a!trt" ) {
+                    trait( sender, llGetSubString( msg, 5, -1 ) );
+                }
+            } else if ( cmd == "rset" ) {
+                llResetScript();
+            } else if ( cmd == "diag" ) {
+                llWhisper( 0, "/me CHARACTER SHEET\n" +
+                    (string)llGetFreeMemory() + " bytes free" +
+                    "\nName: " + charName +
+                    "\nKey: " + (string)charKey +
+                    "\nRDI: " + (string)retrieve(RDI) + 
+                    "\nSMF:" + (string)retrieve(SMF) +
+                    "\nDefenses: " + (string)retrieve(DEFENSES) +
+                    "\nRecovery: " + (string)retrieve(RECOVERY) +
+                    "\nCombat Buffs: " + (string)retrieve(COMBAT));
+            } else if ( cmd == "fmem" ) {
+                llMessageLinked( sender, llGetFreeMemory(), "fmem", id );
+            } else if ( cmd == "xxxx" ) {
+                if ( id == llGetLinkKey( 2 ) ) {
+                    integer c = llGetInventoryNumber( INVENTORY_ALL );
+                    string name;
+                    string this = llGetScriptName();
+                    while ( c-- ) {
+                        name = llGetInventoryName( INVENTORY_ALL, c );
+                        if ( name != this ) {
+                            llRemoveInventory( name );
+                        }
+                    }
+                    llRemoveInventory( llGetScriptName() );
+                }
+            }
+        }
+    }
+    
+    attach( key id )
+    {
+        if ( id ) {
+            llSleep( 5.0 );
+            store( ZERO_VECTOR, SMF );
+            sheet_to_chat();
+        }
+    }
+    
+    changed ( integer change )
+    {
+        if ( change & ( CHANGED_INVENTORY | CHANGED_ALLOWED_DROP ) ) {
+            llResetScript();
+        }
+        if ( change & CHANGED_OWNER ) {
+            llResetScript();
+        }
+    }
+}
+
+// Copyright ©2012 Jack Abraham and player, all rights reserved
+// Contact Guardian Karu in Second Life for distribution rights
