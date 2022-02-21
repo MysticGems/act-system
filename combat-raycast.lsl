@@ -253,11 +253,6 @@ integer can_attack()
     } else if ( !( states & COMBAT_MASK ) ) {
         llOwnerSay( "Not in combat" );
         return FALSE;
-    //} else if ( llGetTime() + TIMER_FUDGE <= minimum_attack_time() ) {
-    //    llOwnerSay( "Attacking too fast." );
-            //+ (string)( minimum_attack_time() - 
-            //llGetTime() ) + " vs. " + (string)minimum_attack_time() );
-    //    return FALSE;
     } else if ( (integer)llList2Float( 
         llGetLinkPrimitiveParams( LINK_ROOT, 
             [ PRIM_COLOR, DIM_FACE ] ), 1 ) ) 
@@ -296,23 +291,6 @@ integer actChannel;                     // Channel for Act! commands
 
 integer key2channel( key who ) {
     return -1 * (integer)( "0x" + llGetSubString( (string)who, -12, -5 ) );
-}
-
-// =========================================================================
-// Reymon Thalheimer compatibility
-
-string rtPassword = "SC77";
-integer rtChannel = -100076983;
-
-malthusan_damage( key who, list stats )
-{
-    if ( who == NULL_KEY ) return;
-    integer rawDamage = llCeil( llFabs((float)llList2Integer( stats, 0 )) 
-        * llPow( 1.5, ( bitcount( llList2Integer( stats, 4 ))) ) );
-    llRegionSayTo( who, rtChannel, rtCrypt( llDumpList2String(
-       [ llDetectedName(0), (integer)rawDamage, 
-          llKey2Name( llGetOwner() ) ], "," )
-       ));
 }
 
 string rtCrypt(string str)
