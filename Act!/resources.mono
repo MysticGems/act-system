@@ -728,7 +728,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
 }
 
 key turn_request = NULL_KEY;
-get_timer( float turn )
+get_timer()
 {
     turn_request = llReadKeyValue( "Act-turnLength" );
 }
@@ -1001,16 +1001,16 @@ default
             myListen = llListen( myChannel, "", NULL_KEY, "" );
         }
         get_timer();
-        llWhisper( DEBUG_CHANNEL, llGetScriptName() + " " +
-            (string)llGetUsedMemory() + " kb used" );
+        // llWhisper( DEBUG_CHANNEL, llGetScriptName() + " " +
+        //     (string)llGetUsedMemory() + " kb used" );
     }
     
-    dataserver( key id, string value )
+    dataserver( key id, string data )
     {
-        error_value = (integer)llGetSubString(value, 0, 0);
-        data = llGetSubString(value, 2, -1);
+        integer error_value = (integer)llGetSubString(data, 0, 0);
+        data = llGetSubString(data, 2, -1);
         if ( id == turn_request ) {
-            if !( error_value ) {
+            if ( !error_value ) {
                 turn_length = (float)llJsonGetValue( data, ["turn"] );
                 defeated_time = (float)llJsonGetValue( data, ["defeated"] );
                 llSetTimerEvent( turn_length );
@@ -1018,7 +1018,7 @@ default
                 llSleep(5.0);
                 get_timer();
             } else {
-                llSetTimerEvent( DEFAULT_TURN )
+                llSetTimerEvent( DEFAULT_TURN );
                 turn_length = DEFAULT_TURN;
                 defeated_time = DEFEATED_TIME;
             }
