@@ -899,3 +899,4 @@ state pursuit
             LINK_DELIM ), llGetOwner() );
     }
 }
+
