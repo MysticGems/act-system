@@ -7,7 +7,7 @@
 
 // -------------------------------------------------------------------------
 // Security settings - remove if source is distributed
-string PASSWORD = "ylADRIezoA1roeQiuDoUHl0douFro1Cr1e6iaSwi";
+string PASSWORD = "REDACTED";
                                     // 40-character authentication
 // -------------------------------------------------------------------------
 
