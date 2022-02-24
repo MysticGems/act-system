@@ -1,0 +1,392 @@
+// =========================================================================
+// Restrained Life Viewer console                                          \
+// By Jack Abraham                                                      \__
+// =========================================================================
+
+handle_commands( list cmds, key id ) {
+    string msg = llList2String( cmds, 0 );
+    // llOwnerSay( llGetScriptName() + ": " + msg );
+    if ( msg == "lock" ) {
+        RL_header = "Lock relay";
+        send_command( victim, [ "@detach=n" ] );
+    } else if ( msg == "unlock" ) {
+        RL_header = "Unlock relay";
+        send_command( victim, [ "@detach=y" ] );
+    } else if ( msg == "stripmenu" ) {
+        list menu = [ "BACK" ] + STRIP_MENU;
+        list cmds = [llGetScriptName()] + STRIP_CMDS;
+        send_menu( "Strip " + llKey2Name( victim ), menu, 
+            cmds );
+    } else if ( msg == "notorso" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_TORSO );
+    } else if ( msg == "notop" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_TOP );
+    } else if ( msg == "notopboobs" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_PRIM_TITS );
+    } else if ( msg == "nopants" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_BOTTOM );
+    } else if ( msg == "nocuffs" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_CUFFS );
+    } else if ( msg == "noirons" ) {
+        RL_header = "MGS strip";
+        send_command( victim, STRIP_LEG_IRONS );
+    } else if ( msg == "noalpha" ) {
+        RL_header = "MGS dealpha";
+        send_command( victim, STRIP_ALPHA );
+    } else if ( msg == "notattoo" ) {
+        RL_header = "MGS no tattoo";
+        send_command( victim, STRIP_TATTOO );
+    } else if ( msg == "sit" ) {
+        if ( object ) {
+            RL_header = "MGS sit";
+            send_command( victim, [ "@unsit=force",
+                "@sit:"+ (string)object + "=force"] );
+        } else {
+            error( "No object targeted; don't know where to sit." );
+        }
+    } else if ( msg == "sitlock" ) {
+        if ( object ) {
+            RL_header = "MGS sit";
+            send_command( victim, [ 
+                "@unsit=n", 
+                "@sit:"+ (string)object + "=force" ] );
+        } else {
+            error( "No object targeted; don't know where to sit." );
+        }
+    } else if ( msg == "notp" ) {
+        RL_header = "Block teleport";
+        send_command( victim, [ "@tplm=n", "@tploc=n", "@sittp=n", "@tplure=n", 
+            "@tplure:" + (string)llGetOwner() + "=add" ] );
+    } else if ( msg == "tp" ) {
+        RL_header = "Allow teleport";
+        send_command( victim, [ "@tplm=y", "@tploc=y", "@sittp=y", "@tplure=y" ] );
+    } else if ( msg == "stand" ) {
+        RL_header = "MGS stand";
+        send_command( victim, [ "@unsit=y", "@unsit=force" ] );
+    } else if ( msg == "gohome" ) {
+        if ( home ) {
+            RL_header = "Send Home";
+            send_command( victim, [ "@tpto:" + 
+                (string)home.x + "/" +
+                (string)home.y + "/" +
+                (string)home.z +
+                "=force" ] );
+        } else {
+            error( "Home not defined." );
+        }
+    } else if ( msg == "wear" ) {
+        pending = WEAR_LIST;
+        RL_header = "Check Wearables";
+        freq = llGetUnixTime() / 5;
+        //llOwnerSay( llGetScriptName() + ": freq = " + (string)freq );
+        llListenRemove( replyHandler );
+        replyHandler = llListen( freq, "", NULL_KEY, "" );
+        send_command( victim, [ "@getinv=" + (string)freq ] );
+    } else if ( msg == "newhome" ) {
+        home = llGetRegionCorner() + llList2Vector(
+            llGetObjectDetails( llGetOwner(), [ OBJECT_POS ] ), 0 );
+        error( "Teleport home will land people here." );
+    } else if ( msg == "puton" ) {
+        RL_header = "Wear items";
+        send_command( victim, 
+            [ "@attach:" + llList2String( cmds, 1 ) + "=force" ] );
+    } else if ( msg == "rlvping" ) {
+        pending = PING;
+        RL_header = "Version check";
+        send_command( victim,
+            [ "!version" ] );
+    }
+}
+
+list MAIN_MENU = 
+    [ "PING", "Strip",
+    "Sit", "Stand", "No TP", "Allow TP",
+    "Lock relay", "Unlock relay", 
+    "Sit lock", "Wear" ];
+list MAIN_CMDS = 
+    [ "rlvc§rlvping", "rlvc§stripmenu",
+    "rlvc§sit", "rlvc§stand", "rlvc§notp", "rlvc§tp",
+    "rlvc§lock", "rlvc§unlock",
+    "rlvc§sitlock", "rlvc§wear" ];
+list STRIP_MENU =
+    [ "Strip torso", "Strip top", "Strip top (leave tits)",
+    "Strip bottom", "Strip cuffs", "Strip leg irons", "Strip alpha",
+    "Strip tattoo" ];
+list STRIP_CMDS =
+    [ "rlvc§notorso", "rlvc§notop", "rlvc§notopboobs", 
+    "rlvc§nopants", "rlvc§nocuffs", "rlvc§noirons", "rlvc§noalpha",
+    "rlvc§notattoo" ];
+list STRIP_TORSO =
+        [ "@detach=n"
+        , "@remoutfit:jacket=force"         //  Strips all torso clothes & prims
+        , "@remoutfit:pants=force"
+        , "@remoutfit:shirt=force"
+        , "@remoutfit:skirt=force"
+        , "@remoutfit:underpants=force"
+        , "@remoutfit:undershirt=force"
+        , "@detach:chest=force"
+        , "@detach:stomach=force"
+        , "@detach:right shoulder=force"
+        , "@detach:left shoulder=force"
+        , "@detach:l upper arm=force"
+        , "@detach:r upper arm=force"
+        , "@detach:spine=force"
+        , "@detach:pelvis=force"
+        , "@detach:left pec=force"
+        , "@detach:right pec=force"
+        ];
+list STRIP_CUFFS =
+        [ "@detach:l forearm=force"
+        , "@detach:r forearm=force"
+        ];
+list STRIP_LEG_IRONS =
+        [ "@detach:l lower leg=force"
+        , "@detach:r lower leg=force"
+        ]; 
+list STRIP_TOP =
+        [ "@detach=n"
+        , "@remoutfit:jacket=force"         //  Strips all torso clothes & prims
+        , "@remoutfit:shirt=force"
+        , "@remoutfit:undershirt=force"
+        , "@detach:chest=force"
+        , "@detach:stomach=force"
+        , "@detach:right shoulder=force"
+        , "@detach:left shoulder=force"
+        , "@detach:l upper arm=force"
+        , "@detach:r upper arm=force"
+        ];
+list STRIP_PRIM_TITS =
+        [ "@remoutfit:jacket=force"         //  Strips all torso clothes & prims
+        , "@remoutfit:shirt=force"
+        , "@remoutfit:undershirt=force"
+        , "@detach:chest=force"
+        , "@detach:stomach=force"
+        // , "@detach:spine=force"
+        , "@detach:right shoulder=force"
+        , "@detach:left shoulder=force"
+        , "@detach:l upper arm=force"
+        , "@detach:r upper arm=force"
+        ];
+list STRIP_ALPHA =
+        [ "@remoutfit:alpha=force" ];     // Remove all alpha layers
+list STRIP_BOTTOM =
+        [ "@detach=n"
+        , "@remoutfit:jacket=force"         //  Strips all torso clothes & prims
+        , "@remoutfit:pants=force"
+        , "@remoutfit:skirt=force"
+        , "@remoutfit:underpants=force"
+        , "@detach:pelvis=force"
+        ];
+list STRIP_TATTOO =
+        [ "@remoutfit:tattoo=force"
+        ];
+vector home;
+
+integer pending;                            // Identify pending commands when
+integer WEAR_LIST = 1;                      // responses arrive
+integer WEAR = 2;
+integer PING = 3;
+
+// -------------------------------------------------------------------------
+
+string LINK_MSG_DELIM = "§";
+string CHAT_MSG_DELIM = "|";
+integer BROADCAST_MASK      = 0xFFF00000;
+integer RLV_MASK            = 0x20000000;
+integer COMMUNICATION_MASK  = 0x10000000;
+
+send_menu( string name, list items, list cmds )
+{
+    llMessageLinked( menuPrim, RLV_MASK,
+        llDumpList2String( [ "menu",
+            name,
+            llList2CSV( items ),
+            llList2CSV( cmds ) ],
+            LINK_MSG_DELIM ),
+        llGetOwner() );
+}
+
+integer RLV_channel = -1812221819;          // Channel for RLV commands
+integer actChannel;                          // Act! channel
+integer ringChannel;
+key victim = NULL_KEY;                      // Who are we picking on
+key object = NULL_KEY;                      // Thing we interact with
+integer RLV_handler;                        // Listener handler for RLV
+string RL_header;
+list RL_command_queue;
+integer freq;                               // Frequency for RLV replies
+integer replyHandler;
+
+send_command( key who, list commands )
+{
+    float power = llList2Float( llGetLinkPrimitiveParams( powerPrim,
+        [ PRIM_COLOR, POWER_FACE ] ), 1 );
+    if ( power <= 0.0 ) return;
+    if ( who == NULL_KEY ) {
+        llOwnerSay( "No target." );
+        return;
+    }
+    llListenRemove( RLV_handler );
+    string command = llDumpList2String( commands, "|" );
+    string RL_command = llDumpList2String ( [ RL_header, who, command ], "," );
+    RLV_handler = llListen( RLV_channel, "", NULL_KEY, "" );
+    llSay( RLV_channel, RL_command );
+    // Do some drain
+    RL_command_queue += commands;
+    llSetTimerEvent( 30.0 );
+    llSetLinkAlpha( powerPrim, power - ( llGetMass() / 100. ), POWER_FACE );
+}
+
+error( string msg )
+{
+    llMessageLinked( LINK_ROOT, COMMUNICATION_MASK,
+        llDumpList2String( [ "IM", msg ], LINK_MSG_DELIM ),
+        llGetOwner() );
+}
+
+integer ok_ko( string command, string response )
+{
+    integer i = llListFindList( RL_command_queue, [ command ] );
+    if ( i > -1 ) {
+        RL_command_queue = llDeleteSubList( RL_command_queue, i, i );
+        if ( response == "ok" )
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+integer menuPrim = LINK_SET;
+integer statusPrim = LINK_SET;
+integer powerPrim;
+integer POWER_FACE = 1;
+
+integer find_prim_named( string name )
+{
+    integer i = llGetNumberOfPrims();
+    name = llToLower( name );
+    while( --i > 0 ) {
+        if ( llToLower( llGetLinkName( i ) ) == name ) {
+            return i;
+        }
+    }
+    return LINK_SET;
+}
+
+// -------------------------------------------------------------------------
+
+default
+{
+    state_entry()
+    {
+        menuPrim = find_prim_named( "menu" );
+        statusPrim = find_prim_named( "screen" );
+        powerPrim = find_prim_named( "construct" );
+    }
+    
+    link_message( integer source, integer flag, string message, key id )
+    {
+        if ( flag & RLV_MASK ) {
+            list msg = llParseString2List( message, [ LINK_MSG_DELIM ], []);
+            string cmd = llList2String(msg, 0);
+            
+            if ( cmd == llGetScriptName() ) {
+                if ( victim ) {
+                    list menu = MAIN_MENU;
+                    list cmds = MAIN_CMDS;
+                    if ( home ) {
+                        menu += [ "Send Home" ];
+                        cmds += [ "rlvc§gohome" ];
+                    }
+                    send_menu( "Control " + llKey2Name( victim ), menu, 
+                        cmds );
+                } else {
+                    error( "No target." );
+                }
+            } else if ( cmd =="rlvc" ) {
+                handle_commands( llList2List( msg, 1, -1 ), id );
+            } else if ( cmd == "rset" ) {
+                llResetScript();
+            } else if ( cmd == "diag" ) {
+                llWhisper( 0, "/me RLV CONTROLLER" +
+                    "\n" + (string)llGetFreeMemory() + " bytes free."
+                    );
+            } else if ( cmd == "trgt" ) {
+                key who = llList2String( msg, 1 );
+                if ( (key)who ) {
+                    if ( llGetAgentSize( who ) ) {
+                        victim = who;
+                    } else {
+                        object = who;
+                    }
+                }
+            }
+        }
+    }
+    
+    listen( integer channel, string name, key id, string msg )
+    {
+        // llOwnerSay( (string)channel + ": " + msg );
+        if ( channel == RLV_channel ) {
+            list parsed = llParseString2List( msg, [ "," ], [] );
+            string cmd_name = llList2String( parsed, 0 );
+            string command = llList2String( parsed, 2 );
+            string reply = llList2String( parsed, 3 );
+            if ( (key)llList2String( parsed, 1 ) == llGetKey() )
+            {
+                if ( cmd_name == RL_header ) {
+                    if ( ok_ko( command, reply ) ) {
+                        // It worked
+                    } else if ( reply == "ko" ) {
+                        llOwnerSay( "Restrained Life refused command \"" 
+                            + command + "\"" );
+                    } else if ( command == "!version" ) {
+                        llOwnerSay( llGetDisplayName( victim ) + "'s \"" + 
+                            name + 
+                            "\" can support RLV version " +
+                            llGetSubString( (string)(
+                            (float)llList2String( parsed, -1 ) / 1000.0 ),
+                            0, 4 ) );
+                    }
+                } else if (( cmd_name == "ping" )
+                        && ( command == "ping" ) 
+                        && ( reply == "ping" )) {
+                    send_command( id, ["!pong"] );
+                } else if ( pending == PING  ) //&& 
+//                (key)llList2String( parsed, 1 ) == "victim" )
+                {
+                    llOwnerSay( llList2String( parsed, -1 ) );
+                    pending = FALSE;
+                }
+            }
+            llSetTimerEvent( 0.0 );
+        } else if ( channel == freq ) {
+            if ( pending == WEAR_LIST ) {
+                list items = llParseString2List( msg, [ "," ], [] );
+                list cmds;
+                integer i;
+                integer c = llGetListLength( items );
+                do {
+                    cmds += [ "rlvc" + LINK_MSG_DELIM + "puton"
+                        + LINK_MSG_DELIM + llList2String( items, i ) ];
+                } while ( ++i < c );
+                send_menu( llKey2Name( victim ) + " wears",
+                    items, cmds );
+            }
+        }
+    }
+
+    timer()
+    {
+        llOwnerSay( "No response from RLV" );
+        pending = FALSE;
+        llSetTimerEvent( 0. );
+    }
+}
+
