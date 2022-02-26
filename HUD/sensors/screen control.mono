@@ -1,0 +1,486 @@
+// ===========================================================================
+// Sensor screen control                                                    \
+// By Jack Abraham                                                       \__
+// ===========================================================================
+
+integer BROADCAST_MASK      = 0xFFF00000;
+integer COMMUNICATION_MASK  = 0x10000000;
+integer SCAN_MASK           = 0x1000000;
+list LEFT_SIDE = [ ATTACH_HUD_TOP_LEFT, ATTACH_HUD_BOTTOM_LEFT ];
+float REFRESH               = 5.0;
+integer displayNames        = TRUE;     // Show display names?
+integer lotsMemory          = 5242880;  // A lot of memory
+integer omgMemory           = 10485760; // OMG a lot of memory
+
+integer targetPrim;
+integer teamPrim;
+integer LIT_FACE = 0;
+
+list team;
+
+// Controls the touch-screen response of the sensor display line by line
+
+list controls;                          // Commands to send, one per line
+list names;
+list data;
+key owner;                              // my owner
+
+vector screenSize = <0.01, 0.24, 0.32>; // Prim size when open
+string NO_TARGET = "( No target )";
+
+process_contacts( list contacts )
+{
+    //if ( controls == llDeleteSubList( contacts, 0, 1 ) ) {
+    //    return;
+    //}
+    controls = llDeleteSubList( contacts, 0, 1 );
+    names = [];
+    data = [];
+    integer i;
+    integer c = llGetListLength( controls );
+    key contact;
+    string name;
+    do {
+        contact = llList2Key( controls, i );
+        if ( llGetAgentSize(contact) != ZERO_VECTOR ) 
+        {
+            if ( displayNames ) {
+                name = llGetDisplayName(contact);
+                if ( name == "???" ) name = llKey2Name( contact );
+            } else {
+                name = llKey2Name( contact );
+                if ( llGetSubString( name, -9, -1 ) == " Resident" ) {
+                    name = llGetSubString( name, 0, -10 );
+                }
+            }
+        } else {
+            name = llKey2Name(contact);
+        }
+        if ( llStringLength( name ) > 22 ) {
+            name = llGetSubString( name, 0, 20 ) + "…";
+        }
+        names += name;
+        data += llList2Integer( 
+            llGetObjectDetails(contact,[OBJECT_SCRIPT_MEMORY]), 0 );
+    } while ( ++i < c ); 
+    update_display( "contacts" );
+}
+
+integer DISPLAY_LINES = 16;
+
+float elapsed;
+
+update_display( string type )
+{
+    llSetTimerEvent( 0.0 );
+    // elapsed = llGetTime();
+    float alpha = llGetAlpha( 4 );
+    integer c = llGetListLength( controls );
+    if ( c ) {
+        if ( alpha == 0.0 ) {
+            llSetAlpha( 0.4, 4 );
+            llSetColor( ZERO_VECTOR, ALL_SIDES );
+            llSetScale( screenSize );
+        }
+        integer i;
+        team = llCSV2List( 
+            llList2String( 
+                llGetLinkPrimitiveParams( teamPrim, [ PRIM_TEXT ] ),
+                0 )
+            );
+        for ( i=0; i < c; i++ ) {
+            if ( llList2Key( controls, i ) ) {
+                llSetLinkPrimitiveParamsFast( 
+                    llList2Integer( displayPrims, i ),
+                    [ PRIM_TEXT ] + sensorData( llList2Key( controls, i ),
+                        llList2String( names, i ), llList2Integer( data, i )) +
+                    [ PRIM_DESC, (string)llList2Key( controls, i ) ]
+                    );
+            } else {
+                llSetLinkPrimitiveParamsFast(
+                    llList2Integer( displayPrims, i ),
+                    [ PRIM_TEXT, llList2String( controls, i ), <1, 1, 1>, 1.0,
+                    PRIM_DESC, "" ]
+                    );
+            }
+        }
+        for ( ; i < DISPLAY_LINES; i ++ )
+        {
+            llSetLinkPrimitiveParamsFast( 
+                llList2Integer( displayPrims, i ),
+                [ PRIM_TEXT, "", ZERO_VECTOR, 0.0,
+                PRIM_DESC, NO_TARGET ]
+                );
+        }
+    } else if ( alpha ) {
+        clear_screen( TRUE );
+    }
+    llSetTimerEvent( REFRESH );
+    // elapsed = llGetTime() - elapsed;
+    // llSetText( (string)llGetFreeMemory() + "kb free; update " + (string)elapsed + " sec.", <1, 0.5, 0.5>, 1.0 );
+}
+
+key get_target()
+{
+    return (key)llList2String( 
+        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
+        , 0 );
+}
+
+clear_screen( integer force )
+{
+    if ( controls != [] || force ) 
+    {
+        llSetScale( <0.01, 0.01, 0.01> );
+        llSetAlpha( 0.0, 4 );
+        integer i;
+        for ( i=0; i < DISPLAY_LINES; i++ )
+        {
+            llSetLinkPrimitiveParamsFast( 
+                llList2Integer( displayPrims, i ),
+                [ PRIM_TEXT, "", ZERO_VECTOR, 0.0,
+                PRIM_DESC, NO_TARGET ]
+                );
+        }
+    }
+    controls = [];
+}
+
+list sensorData( key who, string name, integer data )
+{
+    list details = llGetObjectDetails( who,
+        [ OBJECT_NAME, OBJECT_POS, OBJECT_CREATOR, OBJECT_VELOCITY ] );
+    vector there = llList2Vector( details, 1 );
+    if ( llKey2Name( who ) == "" || there == ZERO_VECTOR ) {
+        if ( who == get_target() ) {
+            llSetLinkPrimitiveParamsFast( targetPrim,
+                [ PRIM_DESC, (string)NULL_KEY ] );
+            llMessageLinked( LINK_ALL_OTHERS, BROADCAST_MASK, 
+                llDumpList2String( [ "trgt", NULL_KEY ], LINK_MSG_DELIM ),
+                llGetKey() );
+        }
+        return [ "(Lost Contact)", <1., 1, 1>, 1.0 ];
+    }
+    string output = name;
+    vector here = llGetPos();
+    float hrange = llVecDist( <here.x, here.y, 0.>, <there.x, there.y, 0.> );
+    float vsep = there.z - here.z;
+    output += " [" + (string)llRound(hrange) + "m";
+    output += compass( there, here );
+    if ( vsep < 0.0 ) {
+        output += "↓";
+    } else {
+        output += "↑";
+    }
+    output += (string)llRound( llFabs( vsep ) );
+    output += "]";
+    
+    if ( data > omgMemory )
+    {
+        output += "☢";
+    }
+    else if ( data > lotsMemory )
+    {
+        output += "⚡";
+    }
+    if ( FALSE && llList2Key( details, 2 ) == NULL_KEY ) // An agent
+    {
+        integer info = llGetAgentInfo( who );
+        if ( info & AGENT_AWAY ) {
+            output += "…";
+        } else if ( info & AGENT_BUSY ) {
+            output += "✘";
+        }
+        if ( info & AGENT_FLYING ) {
+            output += "▲";
+        } else if ( info & AGENT_IN_AIR ) {
+            output += "△";
+        } else if ( info & AGENT_SITTING ) {
+            output += "⚓";
+        }
+        if ( info & AGENT_MOUSELOOK ) {
+            output += "⚔";
+        }
+    }
+
+    if ( who == get_target() ) {
+        output = "▶" + output + "◀";
+    }
+    vector color = <1, 1, 1>;
+    if ( llListFindList( team, [ who ] ) > -1 ) {
+        color = llList2Vector( 
+            llGetLinkPrimitiveParams( LINK_ROOT, 
+                [ PRIM_COLOR, LIT_FACE ] )
+            , 0 );
+    }
+    return [ output, <1.0, 1.0, 1.0>, 
+        display_alpha( llVecDist( here, there ) ) ];
+}
+
+string compass (vector target, vector loc) 
+{
+    float distance = llVecDist(loc, target);
+    float angle = llAtan2( ( target.x-loc.x ) / distance, 
+                ( target.y-loc.y ) / distance ) * RAD_TO_DEG;
+    if ( angle < 0. )
+        angle += 360.;
+    if ( angle < 22.5 )
+        return "N";
+    else if ( angle < 67.5 )
+        return "NE";
+    else if ( angle < 112.5 )
+        return "E";
+    else if ( angle < 157.5 )
+        return "SE";
+    else if ( angle < 202.5 )
+        return "S";
+    else if ( angle < 247.5 )
+        return "SW";
+    else if ( angle < 292.5 )
+        return "W";
+    else if ( angle < 337.5 )
+        return "NW";
+    else
+        return "N";
+}
+
+float NEAR = 20.0;
+float CLOSE = 50.0;
+float FAR = 100.0;
+
+float display_alpha( float range )
+{
+    if ( range <= NEAR ) {
+        return( 1.0 );
+    } else if ( range <= CLOSE ) {
+        return 0.667;
+    } else if ( range <= FAR ) {
+        return 0.5;
+    }
+    return 0.333;
+}
+
+string LINK_MSG_DELIM = "§";
+
+string message( list contents )
+{
+    return llDumpList2String( contents, LINK_MSG_DELIM );
+}
+
+integer this;                           // This script's ID
+this_num() {
+    integer i;
+    integer c;
+    string this_name;
+    c = llGetInventoryNumber( INVENTORY_SCRIPT );
+    this_name = llGetScriptName();
+    for ( ; i < c; ++i ) {
+        if ( this_name == llGetInventoryName( INVENTORY_SCRIPT, i ) )
+            this = i;
+    }
+    this = this + ( 1000 * llGetLinkNumber() );
+}
+
+list displayPrims;              // Prim numbers for line displays
+integer displayLines;           // How many lines do we have to display
+
+display_prims() {               // Identify the prims used for sensor display
+    integer i = llGetNumberOfPrims();
+    integer c;
+    list names;
+    c = llGetNumberOfPrims() + 1;
+    displayPrims = [];
+    displayLines = 0;
+    list parsed;
+    string name;
+    // currentDisplay = [];
+    while( --i >= 0 )
+    {
+        parsed = llParseString2List(llGetLinkName(i),["::"],[]);
+        name = llToLower( llList2String( parsed, 0 ) );
+        if ( name == "display" )
+        {
+            displayPrims += [ i ];
+            ++displayLines;
+            llSetLinkPrimitiveParamsFast( i, 
+                [ PRIM_TEXT, "", ZERO_VECTOR, 0. 
+                , PRIM_TYPE, PRIM_TYPE_CYLINDER, PRIM_HOLE_DEFAULT, 
+                    <0.48, 0.52, 0>, 95.0, <0, 0, 0>, <0, 0, 0>, <0, 0, 0>
+                , PRIM_DESC, ""
+                ] );
+        }
+    }
+}
+
+list get_link_numbers_for_names(list namesToLookFor)
+{
+    list linkNumbers = namesToLookFor;
+    integer f = llGetNumberOfPrims();
+    integer pos = -1;
+    while (--f >= 0) {
+        pos = llListFindList(namesToLookFor, [llGetLinkName(f)]);
+        if (pos > -1) {
+            linkNumbers = llListReplaceList(linkNumbers, [f], pos, pos);
+        }
+    }
+    return linkNumbers;
+}
+
+integer listenHandle;
+integer question;
+integer LOTS = 1;
+integer OMG = 2;
+
+ask( string prompt, integer q )
+{
+    question = q;
+    integer channel = llGetUnixTime();
+    llListenRemove( listenHandle );
+    listenHandle = llListen( channel, "", llGetOwner(), "" );
+    llDialog( llGetOwner(), prompt, [ "!!llTextBox!!" ], channel );
+    //llTextBox( llGetOwner(), prompt, channel );
+}
+
+init()
+{
+    list prims = get_link_numbers_for_names( [ "target" ] );
+    targetPrim = llList2Integer( prims, 0 );
+    teamPrim = llList2Integer( prims, 1 );
+    
+    integer point = llGetAttached();
+    llSetLocalRot( llEuler2Rot(<-PI_BY_TWO, 0, PI_BY_TWO>) );
+    llPreloadSound( "3e6179ee-eb96-d6c5-715e-c34af81ea2e0" );
+}
+
+default
+{
+    state_entry()
+    {
+        this_num();
+        display_prims();
+        init();
+        clear_screen( FALSE );
+        llRequestPermissions( llGetOwner(), PERMISSION_TAKE_CONTROLS );
+        llSetTimerEvent( REFRESH );
+        //llWhisper( DEBUG_CHANNEL, llGetScriptName() + " initialized; "
+        //    + (string)llGetFreeMemory() + " bytes free." );
+    }
+    
+    attach( key id )
+    {
+        if ( id ) {
+            init();
+        }
+    }
+    
+    changed( integer change ) {
+        if ( change & CHANGED_OWNER ) {
+            llSetObjectDesc( "" );
+        }
+    }
+    
+    on_rez( integer p )
+    {
+        if ( llGetAttached() ) {
+            llRequestPermissions( llGetOwner(), PERMISSION_TAKE_CONTROLS );
+        }
+    }
+    
+    link_message( integer prim, integer script, string msg, key id )
+    {
+        list parsed = llParseString2List( msg, [ LINK_MSG_DELIM ], [] );
+        string cmd = llList2String( parsed, 0 );
+        
+        // llOwnerSay( llGetScriptName() + ": " + msg );
+        
+        if ( cmd == "contacts" ) {
+            process_contacts( parsed );
+        } else if ( cmd == "clear screen" ) {
+            clear_screen( FALSE );
+        } else if ( cmd == "show" ) {
+            controls = llList2List( parsed, 1, -1 );
+            update_display( "display" );
+        } else if ( cmd == "trgt" ) {
+            llSleep( 0.05 );
+            update_display( "target" );
+        } else if ( cmd == "scan" ) {
+            if ( llList2String( parsed, 1 ) == "mode" ) {
+                clear_screen( FALSE );
+            }
+        } else if ( cmd == "screen button" ) {
+            controls = [ llDumpList2String(
+                llDeleteSubList( parsed, 0, 0 ), LINK_MSG_DELIM ) ];
+            update_display( "touch" );
+        } else if ( cmd == "display off" ) {
+            clear_screen( TRUE );
+        } else if ( cmd == "rset" ) {
+            llResetScript();
+        } else if ( cmd == "display names" ) {
+            displayNames = !displayNames;
+            controls = [];
+            names = [];
+            data = [];
+            string message = "Display names are ";
+            if ( displayNames ) message += "on.";
+            else message += "off.";
+            llOwnerSay( message );
+        } else if ( cmd == "lot mem" ) {
+            ask( "How much is a lot of memory? (kB)\nCurrently: " 
+                + (string)llRound( lotsMemory / 1024 ), LOTS );
+        } else if ( cmd == "omg mem" ) {
+            ask( "How much is too much memory? (kB)\nCurrently: "
+                + (string)llRound( omgMemory / 1024 ), OMG );
+        } else if ( cmd == "diag" ) {
+            llSay( 0, "DISPLAY MANAGER\n"
+                + (string)llGetFreeMemory() + " bytes free." );
+        } else if ( cmd == "rset" ) {
+            llResetScript();
+        }
+    }
+
+    listen( integer chan, string who, key id, string msg )
+    {
+        llListenRemove( listenHandle );
+        if ( question == LOTS ) {
+            lotsMemory = (integer)msg * 1024;
+            llMessageLinked( LINK_ROOT, COMMUNICATION_MASK, 
+                llDumpList2String(
+                    [ "IM", (string)lotsMemory+" bytes is a lot of memory." ],
+                    LINK_MSG_DELIM ), 
+                id );
+            if ( lotsMemory > omgMemory ) {
+                omgMemory = lotsMemory + 4096;
+            }
+            llMessageLinked( LINK_ROOT, COMMUNICATION_MASK, 
+                llDumpList2String(
+                    [ "IM", (string)omgMemory+" bytes is too much memory." ],
+                    LINK_MSG_DELIM ), 
+                id );
+        } else if ( question == OMG ) {
+            omgMemory = (integer)msg * 1024;
+            llOwnerSay( (string)omgMemory + " bytes is too much of memory." );
+        }
+    }
+    
+    timer()
+    {
+        update_display( "timer" );
+    }
+    
+    touch_end( integer d )
+    {
+        llSleep( 0.1 );
+        update_display( "touched" );
+    }
+
+    run_time_permissions( integer perm )
+    {
+        if ( perm & PERMISSION_TAKE_CONTROLS )
+        {
+            llTakeControls( 1024, FALSE, TRUE );
+        }
+    }
+}
+
+// Copyright ©2010 Jack Abraham; all rights reserved
+// Contact Guardian Karu in Second Life for distribution permission 
