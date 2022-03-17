@@ -36,6 +36,7 @@ integer COMBAT_MASK = 0x01;         //
 integer INVULNERABLE_MASK = 0x02;   //
 integer DEFENDING_MASK = 0x04;      //
 integer PEACE_MASK = 0x08;          //
+integer TURN_MASK = 0x10;           // Using turn-based time
 
 integer inCombat;                   // Used to reset combat time trackers
 
@@ -795,6 +796,7 @@ string SPACER = "                        ";
 integer MAX_TICKS = 15;
 vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
 vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
+vector AROUSAL_COLOR = <1.0, 0.3333, 0.3333>;
 
 string HUDmode;
 
@@ -841,8 +843,13 @@ update_display()
     vector defenses = retrieve( DEFENSES );
     vector needs = retrieve( NEEDS );
     
-    set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-        moralePrim, MORALE_COLOR, 1 ); 
+    if ( needs.y < 1.0 ) {
+        set_bar_level( needs.y, 1.0, 1.0,
+            moralePrim, AROUSAL_COLOR, 1 ); 
+    } else {
+        set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
+            moralePrim, MORALE_COLOR, 1 ); 
+    }
     set_bar_level( srp.z, rdi.y + rdi.z, rec.y,
         focusPrim, FOCUS_COLOR, 0 );
     integer states = (integer)srp.x;
@@ -869,10 +876,6 @@ update_display()
     }
     if ( rec.y < rdi.y + rdi.z ) {
         status += "Fat";
-    }
-    if ( needs.y > 0 ) {
-        status += [ "Arousal " + 
-            (string)llRound( 50.0 * ( needs.y / rdi.x )) + "%" ];
     }
     if ( states & DEFEATED_MASK ) {
         status = ["?????? Defeated ??????"];
