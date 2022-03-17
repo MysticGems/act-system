@@ -3,10 +3,10 @@
 // By Jack Abraham                                                        \__ 
 // ===========================================================================
 
-string charName = "";                   // Who am I?
-string charKey = NULL_KEY;     // Character key
+string charName = "";                                       // Who am I?
+string charKey = "4513d163-9eed-360a-7e8d-413d6a70be07";    // Character key
 
-string defaultCharacter = "Green Lantern";
+string defaultCharacter = "Act! Character";
 integer DEFAULT_LEVEL = 64;
 key defaultLicense = "4513d163-9eed-360a-7e8d-413d6a70be07";
 
@@ -379,7 +379,7 @@ default // Setup
             if ( charKey == NULL_KEY ) {
                 if ( defaultLicense != NULL_KEY ) {
                     charName = defaultCharacter;
-                    charKey = (string)defaultLicense + "-Act";
+                    charKey = (string)defaultLicense + "-Act!";
                     charLevel = DEFAULT_LEVEL;
                     charID = llReadKeyValue( charKey );
                 } else {
@@ -387,7 +387,8 @@ default // Setup
                     llSetTimerEvent( 5.0 );
                 }
             } else {
-                charKey = (string)llGetOwner() + "-Act";
+                charKey = (string)llGetOwner() + "-Act!";
+                llOwnerSay( "Retrieving character sheet " + charKey );
                 charID = llReadKeyValue( charKey );
             }
         }
@@ -410,39 +411,54 @@ default // Setup
         body = llStringTrim( body, STRING_TRIM );
         
         if ( id == charID ) {
-            list data = llParseString2List( body, [ DATA_DELIM ], [] );
-            integer i = llListFindList( data, ["attributes"] );
-            if ( i > -1 ) {
-                attributes = (vector)llList2String( data, i + 1 );
-            }
-            
-            i = llListFindList( data, ["traits"] );
-            if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
-                traits = llParseString2List( llList2String( data, i+1 ),
-                    [ "^" ], [] );
-            } else {
-                traits = [];
-            }
-            
-            i = llListFindList( data, ["skills"] );
-            if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
-                skills = llParseString2List( llList2String( data, i+1 ),
-                    [ "^" ], [] );
-                integer c = 1;
-                integer l = llGetListLength( skills );
-                float val;
-                while ( c < l ) {
-                    val = (float)llList2String( skills, c );
-                    if ( val != 0.0 ) {
-                        skills = llListReplaceList( skills, [val], c, c );
-                    }
-                    c += 2;
+            llOwnerSay( body );
+            if (llGetSubString(body,0,0) == "1") {
+                // Read from the data server
+                body = llGetSubString( body, 2, -1 );
+                list data = llParseString2List( body, [ DATA_DELIM ], [] );
+                
+                integer i = llListFindList( data, ["name"] );
+                if ( i > -1 ) {
+                    charName = llList2String( data, i + 1 );
                 }
+
+                i = llListFindList( data, ["attributes"] );
+                if ( i > -1 ) {
+                    attributes = (vector)llList2String( data, i + 1 );
+                }
+                
+                i = llListFindList( data, ["traits"] );
+                if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
+                    traits = llParseString2List( llList2String( data, i+1 ),
+                        [ "^" ], [] );
+                } else {
+                    traits = [];
+                }
+                
+                i = llListFindList( data, ["skills"] );
+                if ( i > -1 && llList2String( data, i+1 ) != "NO_DATA" ) {
+                    skills = llParseString2List( llList2String( data, i+1 ),
+                        [ "^" ], [] );
+                    integer c = 1;
+                    integer l = llGetListLength( skills );
+                    float val;
+                    while ( c < l ) {
+                        val = (float)llList2String( skills, c );
+                        if ( val != 0.0 ) {
+                            skills = llListReplaceList( skills, [val], c, c );
+                        }
+                        c += 2;
+                    }
+                } else {
+                    skills = [];
+                }
+                store_all_values();
+                state active;
             } else {
-                skills = [];
+                list error_num = llCSV2List( body );
+                integer error = llList2Integer( error_num, 1 );
+                llOwnerSay("Error retrieving character sheet; Act! is disabled.\nError: " + llGetExperienceErrorMessage( error ) );
             }
-            store_all_values();
-            state active;
         }        
     }
     
@@ -541,9 +557,9 @@ state active
 {
     state_entry()
     {
-        //llWhisper( DEBUG_CHANNEL, "Character sheet active; " 
-        //    + (string)llGetFreeMemory()
-        //    + " bytes free." );
+        llOwnerSay( "Character sheet active; " 
+            + (string)llGetFreeMemory()
+            + " bytes free." );
         sheet_to_chat();
         if ( llGetInventoryType( RESOURCE_SCRIPT ) == INVENTORY_SCRIPT ) {
             llResetOtherScript( RESOURCE_SCRIPT );
