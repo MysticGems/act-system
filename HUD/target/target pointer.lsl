@@ -512,7 +512,7 @@ state tracking
                 key my_seat = llList2Key( 
                     llGetObjectDetails( llGetOwner(), [ OBJECT_ROOT ] ), 0 );
                 if ( my_seat == target_seat ) {
-                    name += "h";
+                    name += "⨇";
                 }
             }
             if ( info & AGENT_MOUSELOOK ) {
