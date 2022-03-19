@@ -507,6 +507,13 @@ state tracking
                 name += "△";
             } else if ( info & AGENT_SITTING ) {
                 name += "⚓";
+                key target_seat = llList2Key( 
+                    llGetObjectDetails( target, [ OBJECT_ROOT ] ), 0 );
+                key my_seat = llList2Key( 
+                    llGetObjectDetails( llGetOwner(), [ OBJECT_ROOT ] ), 0 );
+                if ( my_seat == target_seat ) {
+                    name += "h";
+                }
             }
             if ( info & AGENT_MOUSELOOK ) {
                 name += "⚔";
