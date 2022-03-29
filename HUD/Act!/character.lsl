@@ -236,38 +236,6 @@ send( integer dest, integer sig, list message ) {
     llSay( dest, llDumpList2String( [ sig ] + message, ACT_DELIM ) );
 }
 
-integer teamPrim;
-
-// Return a list of team members
-list get_team()
-{
-    list team = llCSV2List( 
-        llList2String( 
-            llGetLinkPrimitiveParams( teamPrim, [ PRIM_TEXT ] ),
-            0 )
-        );
-    integer c = llGetListLength( team );
-    while ( --c >= 0 ) {
-        key member = (key)llList2String( team, c );
-        team = llListReplaceList( team, [ member ], c, c );
-    }
-    return team;
-}
-
-// Send a team-related message to all team members
-send_to_team( list message )
-{
-    string msg = llDumpList2String( ["act!", "team"] + message, ACT_DELIM );
-    list team = get_team();
-    integer c = llGetListLength( team );
-    key member;
-    while ( c-- >= 0 ) {
-        member = llList2Key( team, c );
-        llRegionSay( key2channel( member ),
-            (string)member + ACT_DELIM + msg );
-    }
-}
-
 integer menuPrim = LINK_SET;            // Where's the menu?
 
 integer key2channel( key who ) {
@@ -325,6 +293,131 @@ announce( string text, integer public )
     llSetObjectName( primName );
 }
 
+// ===========================================================================
+// Update prim level bars
+
+integer moralePrim;
+integer focusPrim;
+integer statesPrim;
+integer arousalPrim;
+integer hungerPrim;
+
+string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
+string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
+string DAMAGED = "____________________";
+string SPACER = "                            ";
+integer MAX_TICKS = 15;
+vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
+vector AROUSAL_COLOR = <1.0, 0.5, 0.5>;
+vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
+
+string HUDmode;
+
+list showFocusModes =                   // Show focus bar in these modes
+    [ "combat", "construct", "Act!" ];
+integer showFocus = TRUE;               // Show the focus bar or not
+
+set_bar_level( float current, float attrib, float max, integer prim, vector color, 
+    integer line )
+{
+    string bar;
+    float ratio;
+    float maximum;
+    attrib = (float)llFloor( attrib );
+    max = (float)llFloor( max );
+    
+    if ( current < 0 ) current = 0.0;
+    if ( attrib > 0 ) {
+        ratio = ( current / attrib );
+        maximum = ( max / attrib );
+    }
+    integer level = (integer)( ratio * (float)MAX_TICKS );
+    integer limit = (integer)( maximum * (float)MAX_TICKS );
+    if ( level ) {
+        bar = llGetSubString( SOLID, 0, level - 1 );
+    }
+    if ( level < limit ) {
+        bar += llGetSubString( HOLLOW, 0, limit - level - 1 );
+    }
+    if ( limit < MAX_TICKS ) {
+        bar += llGetSubString( DAMAGED, 0, MAX_TICKS - limit - 1 );
+    }
+    if ( line ) bar = bar + SPACER;
+    else bar = SPACER + bar;
+    llSetLinkPrimitiveParamsFast( prim, [ PRIM_TEXT, bar, color, 1.0 ] );
+    // llSay( 0, llDumpList2String( [ current, attrib, max, level, limit ], "/" ) );
+}
+
+// Bitmasks for states (resources.x)
+integer STUNNED_MASK = 0x2;         // ?
+integer RESTRAINED_MASK = 0x4;      // ?
+integer DEFEATED_MASK = 0x8;        // ?
+integer WOUNDED_MASK = 0x10;        // ?
+integer VULNERABLE_MASK = 0x80;     //
+integer TURN_MASK = 0x100;          // Using turn-based time
+integer SEX_MASK = 0x200;           // Using Sex Act!
+
+// Bitmasks for combat status (defenses.z)
+integer COMBAT_MASK = 0x01;         //
+integer INVULNERABLE_MASK = 0x02;   //
+integer DEFENDING_MASK = 0x04;      //
+integer PEACE_MASK = 0x08;          //
+
+update_display()
+{
+    vector srp = retrieve( SMF );
+    vector rdi = retrieve( RDI );
+    vector rec = retrieve( RECOVERY );
+    vector defenses = retrieve( DEFENSES );
+    vector needs = retrieve( NEEDS );
+    
+    if ( (integer)defenses.z & SEX_MASK ) {
+        set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
+            moralePrim, AROUSAL_COLOR, 1 ); 
+    } else {
+        set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
+            moralePrim, MORALE_COLOR, 1 ); 
+    }
+    set_bar_level( srp.z, rdi.y + rdi.z, rec.y,
+        focusPrim, FOCUS_COLOR, 0 );
+    integer states = (integer)srp.x;
+    list status;
+    if ( (integer)defenses.z & TURN_MASK ) {
+        status += "Trn";
+    }
+    if ( states & STUNNED_MASK ) {
+        status += "Stn";
+    }
+    if ( states & WOUNDED_MASK ) {
+        status += "Wnd";
+    }
+    if ( states & RESTRAINED_MASK ) {
+        status += "Res";
+    }
+    if ( states & VULNERABLE_MASK ) {
+        status += "Vul";
+    }
+    if ( (integer)defenses.z & COMBAT_MASK ) {
+        status += "Cbt";
+    }
+    if ( (integer)defenses.z & INVULNERABLE_MASK ) {
+        status += "Inv";
+    }
+    if ( (integer)rec.y < (integer)rdi.y + (integer)rdi.z ) {
+        status += "Fat";
+    }
+    if ( needs.y > 0 ) {
+        status += [ "Arousal " + 
+            (string)llRound( 100.0 * ( needs.y / ( rdi.x + rdi.z ) )) + "%" ];
+    }
+    if ( states & DEFEATED_MASK ) {
+        status = ["◤◢◤◢ Defeated ◤◢◤◢"];
+    }
+    llSetLinkPrimitiveParams( statesPrim, 
+        [ PRIM_TEXT, llDumpList2String( status, " " ) + "\n \n ",
+            <1.0, 0.625, 0.625>, 1.0 ] );
+}
+
 // ------------------------------------------------------------------------
 // Experience keys access
 
@@ -363,10 +456,15 @@ default // Setup
 {
     state_entry()
     {
+        llSetText( "", ZERO_VECTOR, 0.0 );
         list prims = get_link_numbers_for_names(
-            [ "menu", "combat" ] );
+            [ "menu", "states", "morale", "focus" ] );
         menuPrim = llList2Integer( prims, 0 );
-        teamPrim = llList2Integer( prims, 1 );
+        statesPrim = llList2Integer( prims, 1 );
+        moralePrim = llList2Integer( prims, 2 );
+        focusPrim = llList2Integer( prims, 3 );
+        llSetLinkPrimitiveParams( statesPrim, 
+            [ PRIM_TEXT, "", <1.0, 0.625, 0.625>, 1.0 ] );
         if ( llGetNumberOfSides() < COMBAT + 1 ) {
             llSay( DEBUG_CHANNEL, 
                 "Insufficient prim faces for data storage; need " 
@@ -375,25 +473,38 @@ default // Setup
         }
         //llOwnerSay( llGetScriptName() + " starting; " + (string)llGetFreeMemory()
         //    + " bytes free." );
-        if ( llGetAttached() && llAgentInExperience( llGetOwner() ) ) {
-            if ( charKey == NULL_KEY ) {
-                if ( defaultLicense != NULL_KEY ) {
-                    charName = defaultCharacter;
-                    charKey = (string)defaultLicense + "-Act!";
-                    charLevel = DEFAULT_LEVEL;
-                    charID = llReadKeyValue( charKey );
+        if ( llGetAttached()  ) {
+            if ( llAgentInExperience( llGetOwner() ) ) {
+                if ( charKey == NULL_KEY ) {
+                    if ( defaultLicense != NULL_KEY ) {
+                        charName = defaultCharacter;
+                        charKey = (string)defaultLicense + "-Act!";
+                        charLevel = DEFAULT_LEVEL;
+                        charID = llReadKeyValue( charKey );
+                    } else {
+                        // Start polling for default license
+                        llSetTimerEvent( 5.0 );
+                    }
                 } else {
-                    // Start polling for default license
-                    llSetTimerEvent( 5.0 );
+                    charKey = (string)llGetOwner() + "-Act!";
+                    llOwnerSay( "Retrieving character sheet " + charKey );
+                    charID = llReadKeyValue( charKey );
                 }
             } else {
-                charKey = (string)llGetOwner() + "-Act!";
-                llOwnerSay( "Retrieving character sheet " + charKey );
-                charID = llReadKeyValue( charKey );
+                llOwnerSay( "Your experience is not active here. Please reattach your HUD when you are in an area that allows the experience." );
+                llRequestPermissions( llGetOwner(), PERMISSION_ATTACH );
             }
         }
     }
             
+    run_time_permissions( integer perm ) {
+        if ( perm & PERMISSION_ATTACH ) {
+            if ( llGetAttached() ) {
+                llDetachFromAvatar();
+            }
+        }
+    }
+
     timer()
     {
         if ( defaultLicense == NULL_KEY ) {
@@ -411,15 +522,27 @@ default // Setup
         body = llStringTrim( body, STRING_TRIM );
         
         if ( id == charID ) {
-            llOwnerSay( body );
+            // Read from the data server
             if (llGetSubString(body,0,0) == "1") {
-                // Read from the data server
                 body = llGetSubString( body, 2, -1 );
                 list data = llParseString2List( body, [ DATA_DELIM ], [] );
                 
-                integer i = llListFindList( data, ["name"] );
+                integer i = llListFindList( data, ["background"] );
                 if ( i > -1 ) {
-                    charName = llList2String( data, i + 1 );
+                    list background = llParseString2List( 
+                        llList2String( data, i+1 ),
+                        [ "^" ], [] );
+                    i = llListFindList( background, ["name"] );
+                    if ( i > -1 ) {
+                        charName = llList2String( background, i + 1 );
+                    } else {
+                        charName = llGetDisplayName( llGetOwner() );
+                    }
+                }
+
+                i = llListFindList( data, ["level"] );
+                if ( i > -1 ) {
+                    charLevel = (integer)llList2String( data, i + 1 );
                 }
 
                 i = llListFindList( data, ["attributes"] );
@@ -455,6 +578,7 @@ default // Setup
                 store_all_values();
                 state active;
             } else {
+                // Failed to read
                 list error_num = llCSV2List( body );
                 integer error = llList2Integer( error_num, 1 );
                 llOwnerSay("Error retrieving character sheet; Act! is disabled.\nError: " + llGetExperienceErrorMessage( error ) );
@@ -626,9 +750,22 @@ state active
     attach( key id )
     {
         if ( id ) {
-            llSleep( 5.0 );
-            store( ZERO_VECTOR, SMF );
-            sheet_to_chat();
+            if ( llAgentInExperience( llGetOwner() ) ) {
+                llSleep( 5.0 );
+                store( ZERO_VECTOR, SMF );
+                sheet_to_chat();
+            } else {
+                llOwnerSay( "Your experience is not active here. Please reattach your HUD when you are in an area that allows the experience." );
+                llRequestPermissions( llGetOwner(), PERMISSION_ATTACH );
+            }
+        }
+    }
+    
+    run_time_permissions( integer perm ) {
+        if ( perm & PERMISSION_ATTACH ) {
+            if ( llGetAttached() ) {
+                llDetachFromAvatar();
+            }
         }
     }
     
@@ -639,6 +776,9 @@ state active
         }
         if ( change & CHANGED_OWNER ) {
             llResetScript();
+        }
+        if ( change & CHANGED_COLOR ) {
+            update_display();
         }
     }
 }
