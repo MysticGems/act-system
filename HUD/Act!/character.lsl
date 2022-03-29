@@ -383,39 +383,39 @@ update_display()
     integer states = (integer)srp.x;
     list status;
     if ( (integer)defenses.z & TURN_MASK ) {
-        status += "Trn";
+        status += "↺";
     }
     if ( states & STUNNED_MASK ) {
-        status += "Stn";
+        status += "⊘";
     }
     if ( states & WOUNDED_MASK ) {
-        status += "Wnd";
+        status += "☤";
     }
     if ( states & RESTRAINED_MASK ) {
-        status += "Res";
+        status += "◉";
     }
     if ( states & VULNERABLE_MASK ) {
-        status += "Vul";
+        status += "‼";
     }
     if ( (integer)defenses.z & COMBAT_MASK ) {
-        status += "Cbt";
+        if ( (integer)defenses.z & SEX_MASK ) {
+            status += "⚤";
+        } else {
+            status += "⚔";
+        }
     }
     if ( (integer)defenses.z & INVULNERABLE_MASK ) {
         status += "Inv";
     }
     if ( (integer)rec.y < (integer)rdi.y + (integer)rdi.z ) {
-        status += "Fat";
-    }
-    if ( needs.y > 0 ) {
-        status += [ "Arousal " + 
-            (string)llRound( 100.0 * ( needs.y / ( rdi.x + rdi.z ) )) + "%" ];
+        status += "_";
     }
     if ( states & DEFEATED_MASK ) {
         status = ["◤◢◤◢ Defeated ◤◢◤◢"];
     }
     llSetLinkPrimitiveParams( statesPrim, 
-        [ PRIM_TEXT, llDumpList2String( status, " " ) + "\n \n ",
-            <1.0, 0.625, 0.625>, 1.0 ] );
+        [ PRIM_TEXT, llDumpList2String( status, " " ),
+            <1.0, 1.0, 1.0>, 1.0 ] );
 }
 
 // ------------------------------------------------------------------------
