@@ -9,8 +9,11 @@ integer peacePrim;                  // Display for useActDamage
 float DB_DENOMINATOR = 32.0;        // This much DB gives 2× protection
 float DODGE_FOCUS_MULT = 2.0;       // Focus multiplier for successful defense
 
+string attackers;                   // Colon-delimited list of keys for objects
+                                    // that have already damaged you this turn
+
 // Values stored in faces:
-//  Face 0: Nutrition, Arousal, TBD
+//  Face 0: Nutrition, Arousal, 
 integer NEEDS = 0;
 //  Face 1: Resiliance, Drive, Insight
 integer RDI = 1;
@@ -18,7 +21,8 @@ integer RDI = 1;
 integer SMF = 2;
 //  Face 3: Defense Bonus, Damage Resistance, Combat status conditions
 integer DEFENSES = 3;
-//  Face 4: Displayed face toward user; do not use
+//  Face 4: Displayed face toward user; do not use for storage
+integer DISPLAY_FACE = 4;
 //  Face 5: Focus recovery rate, Max Focus, Morale recovery rate
 integer RECOVERY = 5;
 // Face 6: Damage modifier, DB modifier, conditions mask
@@ -26,17 +30,18 @@ integer COMBAT = 6;
 
 // Bitmasks for states (resources.x)
 integer STUNNED_MASK = 0x2;         // ?
-integer IMMOBILIZE_MASK = 0x4;      // ?
+integer RESTRAINED_MASK = 0x4;      // ?
 integer DEFEATED_MASK = 0x8;        // ?
-integer DISABLEED_MASK = 0x10;        // ?
+integer WOUNDED_MASK = 0x10;        // ?
 integer VULNERABLE_MASK = 0x80;     //
+integer TURN_MASK = 0x100;          // Using turn-based time
+integer SEX_MASK = 0x200;           // Using Sex Act!
 
 // Bitmasks for combat status (defenses.z)
 integer COMBAT_MASK = 0x01;         //
 integer INVULNERABLE_MASK = 0x02;   //
 integer DEFENDING_MASK = 0x04;      //
 integer PEACE_MASK = 0x08;          //
-integer TURN_MASK = 0x10;           // Using turn-based time
 
 integer inCombat;                   // Used to reset combat time trackers
 
@@ -48,12 +53,8 @@ float lastDodge;
 float invulnerableUntil;
 float damageBuffUntil;
 
-// Timing (experience-specific)
-float turn_length = 0.0;            // How long a turn lasts
-float defeated_time = 0.0;          // How long to be defeated
-
-float DEFEATED_TIME = 60.0;               // How long to be defeated
-float DEFAULT_TURN = 5.0;           // How long a turn lasts
+float STUNNED_TIME = 5.0;           // How long to be stunned by excess damage
+float KO_TIME = 60.0;               // How long to be defeated
 
 list shield;                        // Shield key, fraction passed through,
                                     // range, expiration time
@@ -64,11 +65,15 @@ integer menuPrim;
 integer commPrim;
 integer combatPrim;
 integer teamPrim;
+integer actMenuPrim;
+
+key ACT_ICON = "70d6027a-f4e2-4cbe-70f3-85d218083b13";
+key SEX_ACT_ICON = "d2dca9fb-85e9-7fe1-cee3-2153271ef85a";
 
 handle_command( integer sender, integer signal, string msg, key id )
 {
     if ( signal & RP_MASK ) {
-        //llOwnerSay( llGetLinkName( sender ) + ":" + (string)signal + ": " + msg );
+        // llOwnerSay( llGetLinkName( sender ) + ":" + (string)signal + ": " + msg );
 
         string cmd = llGetSubString( msg, 0, 3 );
         if ( cmd == "act!" ) {
@@ -80,17 +85,14 @@ handle_command( integer sender, integer signal, string msg, key id )
             list parsed = llParseString2List( msg, 
                 [ ACT_DELIM, LINK_DELIM ], [] );
             cmd = llList2String( parsed, 1 );
+            // llOwnerSay( "Act! command: " + llList2CSV( parsed ) );
             
             // Take damage & reduce focus
             if ( cmd == "a!dmg" ) {
                 take_damage( llList2List( parsed, 2, -1 ), 
-                    llGetOwnerKey( id ) );
+                    id );
             } else if ( cmd == "a!fcs" ) {
                 use_focus( llList2List( parsed, 2, -1 ) );
-            // Take arousal
-            } if ( cmd == "a!sex" ) {
-                arouse( llList2List( parsed, 2, -1 ),
-                    llGetOwnerKey( id ) );
             // Adjust attributes, defenses, resources, etc.
             } else if ( cmd == "a!def" ) {
                 vector buff = (vector)llList2String( parsed, 2 );
@@ -106,11 +108,11 @@ handle_command( integer sender, integer signal, string msg, key id )
                         stunnedUntil = llListStatistics( LIST_STAT_MAX,
                             [ stunnedUntil, expires ] );
                     }
-                    if ( ( states & IMMOBILIZE_MASK ) && expires > 0.1 ) {
+                    if ( ( states & RESTRAINED_MASK ) && expires > 0.1 ) {
                         restrainedUntil = llListStatistics( LIST_STAT_MAX,
                             [ restrainedUntil, expires ] );
                     }
-                    if ( ( states & DISABLEED_MASK ) && expires > 0.1 ) {
+                    if ( ( states & WOUNDED_MASK ) && expires > 0.1 ) {
                         woundedUntil = llListStatistics( LIST_STAT_MAX,
                             [ woundedUntil, expires ] );
                     }
@@ -216,6 +218,11 @@ handle_command( integer sender, integer signal, string msg, key id )
                         }
                     }
                 }
+            } else if ( cmd == "turn" ) {
+                // New turn in turn-based activity
+                if ( get_flag( TURN_MASK ) ) {
+                    resting_recovery();
+                }
             } else if ( cmd == "focus" ) {
                 integer level = signal & 0xFF;
                 if ( level ) {
@@ -250,16 +257,18 @@ handle_command( integer sender, integer signal, string msg, key id )
             } else if ( cmd == "mygrp" ) {
                 sameGroupOnly = !sameGroupOnly;
                 if ( sameGroupOnly ) {
-                    llOwnerSay( "Act! will only interact with people in "
-                        + "secondlife:///app/group/" 
-                        + (string)llList2Key( 
-                            llGetObjectDetails( llGetKey(), [ OBJECT_GROUP ] ), 
-                            0 ) 
-                        + "/about." );
+                    llOwnerSay( "Act! will only interact with people in your active group." );
                 } else {
                     llOwnerSay( "Interacting with everyone." );
                 }
             } else if ( cmd == "amenu" ) {
+                vector defenses = retrieve( DEFENSES );
+                if ( (integer)defenses.z & SEX_MASK ) {
+                    menuItems += ", Sex Act! Off";
+                } else {
+                    menuItems += ", Sex Act! On";
+                }
+                menuCommands += ", act!§actmode";
                 llMessageLinked( menuPrim, RP_MASK, 
                     llDumpList2String( [ "menu", "Act! Menu",
                         menuItems, menuCommands ], LINK_DELIM ),
@@ -273,15 +282,16 @@ handle_command( integer sender, integer signal, string msg, key id )
                             LINK_DELIM ),
                         llGetOwner() );
                 }
+            } else if ( cmd == "actmode") {
+                toggle_act_mode();
             }
         } else if ( cmd == "rset" ) {
             llSleep( 5.0 );
             llResetScript();
-        } else if ( cmd == "fmem" ) {
-            llMessageLinked( sender, llGetFreeMemory(), "fmem", id );
         } else if ( cmd == "diag" ) {
             llWhisper( 0, "/me ACT! RESOURCE TRACKER\n" +
                 (string)llGetFreeMemory() + " bytes free" +
+                "\nACT! channel: " + (string)myChannel +
                 "\nRDI: " + (string)retrieve(RDI) + 
                 "\nSMF:" + (string)retrieve(SMF) +
                 "\nDefenses: " + (string)retrieve(DEFENSES) +
@@ -289,48 +299,6 @@ handle_command( integer sender, integer signal, string msg, key id )
         }
     }
 }
-// ===========================================================================
-// The sex action
-// Action sex notation
-// |     Arousal
-// |     |
-// |     |   Max arousal
-// |     |   |   Kinks (removes max arousal)
-// |     |   |   |     Fetishes (required for arousal)
-// |     |   |   |     |
-// a!sex:100:100:kinks:fetishes
-
-integer refractory;                 // Time when you can't be aroused
-
-arouse( list effect, key id )
-{
-    if ( get_flag( PEACE_MASK ) ) return;
-    vector needs = retrieve( NEEDS );
-    vector attributes = retrieve( RDI );
-    
-    float arousal = (float)llList2String( effect, 0 );
-    float arousalLimit = (float)llList2String( effect, 1 ) * 50.0 / attributes.x;
-    
-    if ( needs.y + arousal > arousalLimit ) {
-        needs.y = arousalLimit;
-    } else {
-        needs.y += arousal;
-    }
-    
-    if ( llGetUnixTime() < refractory ) {
-        if ( needs.y > attributes.x ) {
-            needs.y = attributes.x;
-            llOwnerSay( "Arousal capped by refractory period." );
-        }
-    } else if ( needs.y > ( attributes.x * 2.0 ) ) {
-        llSay( 0, llGetObjectDesc() + " cums!" );
-        refractory = llGetUnixTime() + 6200 - llRound( 100.0 * attributes.y );
-        needs.y = attributes.x;
-    }
-    
-    store( needs, NEEDS ); 
-}
-
 // ===========================================================================
 // The damage field:
 // Action damage notation
@@ -354,14 +322,16 @@ arouse( list effect, key id )
 //  cor = corrosive, acid
 //  psy = psychic or psychological
 //  drn = energy drain
+//  sex = sexual arousal
 
 // Damage flags
 integer DAZED_MASK = 0x1;       // Target may lose all defense bonus
 integer STUN_MASK = 0x2;        // Target becomes unable to act
-integer IMMOBILE_MASK = 0x4;    // Target becomes unable to move
+integer RESTRAIN_MASK = 0x4;    // Target becomes unable to move
+// integer 0x8                     Unused
 integer KNOCKBACK_MASK = 0x10;  // Target moves away from attacker
 integer THREAT_MASK = 0x20;     // Target switches target to attacker
-integer DISABLE_MASK = 0x40;    // Target's recovery reduced
+integer WOUND_MASK = 0x40;      // Target's recovery reduced
 // integer 0x80                    Unused
 integer SUPER_MASK = 0x100;     // Damage penetrates invulnerability
 
@@ -383,13 +353,32 @@ take_damage( list damage, key id )       // Process taking damage
     integer attackFlags = (integer)llList2String( damage, 4 );
     integer statusFlags = (integer)resources.x;
     integer defenseFlags = (integer)defense.z;
+    
+    if ( defenseFlags & TURN_MASK ) {
+        if ( llSubStringIndex( attackers, (string)id ) > -1 ) {
+            if ( statusFlags & STUNNED_MASK ) {
+                llMessageLinked( LINK_THIS, RP_MASK, "act!" + LINK_DELIM +    
+                    "turn", llGetOwner() );
+            } else {
+                llRegionSayTo( llGetOwnerKey(id), 0, "Already attacked " +
+                    "secondlife:///app/agent/" + (string)llGetOwner() + "/info" );
+                return;
+            }
+        } else {
+            attackers += ":" + (string)id;
+            if ( llStringLength( attackers ) > 259 ) {
+                attackers = llGetSubString( attackers, 37, -1 );
+            }
+        }
+    }
+    
     if ( defenseFlags & INVULNERABLE_MASK ) {
         if ( !( attackFlags & SUPER_MASK ) ) {
             return;
         }
     }
     if ( !( statusFlags & VULNERABLE_MASK ) ) 
-    {                                   // No defense on crit or if restrained
+    {                                   // No defense if vulnerable
         float dodgeChance = ( attributes.z *
             llListStatistics( LIST_STAT_MIN, [ now - lastDodge, 1.0 ] ) );
         float dodgeRoll = llFrand( 65.0 );
@@ -399,11 +388,13 @@ take_damage( list damage, key id )       // Process taking damage
         {                                           // Successful defense roll
             defense.x += attributes.x;              // Add resiliance to DB
             llOwnerSay( "Defended!" );
-            llWhisper( power_channel( llGetOwner() ), llDumpList2String(
-                [ llGetOwner(), "play", "defend", 0.25 ], CHAT_DELIM ) );
+            if ( !( llGetAgentInfo( llGetOwner() ) & AGENT_SITTING ) ) {
+                llWhisper( power_channel( llGetOwner() ), llDumpList2String(
+                    [ llGetOwner(), "play", "defend", 0.25 ], CHAT_DELIM ) );
+            }
             if ( defenseFlags & DEFENDING_MASK ) {
-                float focusBonus = ( now - lastDodge ) * recovery.x *
-                    DODGE_FOCUS_MULT;
+                float focusBonus = recovery.x * DODGE_FOCUS_MULT *
+                    llListStatistics( LIST_STAT_MIN, [ now - lastDodge, 1.0 ] );
                 resources.z += focusBonus;
                 if ( statusMsg ) {
                     llOwnerSay( "Focus +" + (string)llRound(focusBonus) );
@@ -449,29 +440,50 @@ take_damage( list damage, key id )       // Process taking damage
     if ( dmg >= 0 ) {
         float statusUntil = FALSE;
         if ( !statusOnly ) {
-            resources.y -= dmg;
-            if ( statusMsg ) {
-                llOwnerSay( "Morale -" + (string)llRound(dmg) );
+            if ( type == "drn" ) {
+                resources.z -= dmg;
+                if ( statusMsg ) {
+                    llOwnerSay( "Focus −" + (string)llRound(dmg) );
+                }
+            } else {
+                resources.y -= dmg;
+                if ( statusMsg ) {
+                    llOwnerSay( "Morale -" + (string)llRound(dmg) );
+                }
             }
             statusUntil = now + ( dmg / 2.0 );
         } else {
             statusUntil = now + ( dmg );
         }
         
-        // Check status effects
+        // Status effects for turn-based action
+        if ( ( defenseFlags & TURN_MASK ) && !statusOnly ) {
+            float resistRoll = llFrand( 65.0 );
+            // llOwnerSay( "resistRoll=" + (string)resistRoll +
+            //    "; resilience=" + (string)attributes.x );
+            if ( resistRoll <= attributes.x ) {
+                if ( attackFlags ) llOwnerSay( "Resisted status effects" );
+                attackFlags = FALSE;
+            }
+        }
+        
+        // Apply status effects
         if ( ( dmg >= attributes.x / 2.0 ) ||
             ( attackFlags & STUN_MASK ) ) // Inflict stunned result
         {
             statusFlags = statusFlags | STUNNED_MASK;
             stunnedUntil = llListStatistics( LIST_STAT_MAX,
                 [ stunnedUntil, statusUntil ] );
+            if ( !( defenseFlags & TURN_MASK ) ) {
                 llMessageLinked( LINK_ROOT, UI_MASK, 
                     llDumpList2String( ["busy", stunnedUntil - now ],
                         LINK_DELIM ),
                     llGetOwner() );
+            }
+            attackers = "";
         }
-        if ( attackFlags & DISABLE_MASK ) {
-            statusFlags = statusFlags | DISABLEED_MASK;
+        if ( attackFlags & WOUND_MASK ) {
+            statusFlags = statusFlags | WOUNDED_MASK;
             woundedUntil = llListStatistics( LIST_STAT_MAX,
                 [ woundedUntil, statusUntil ] );
         }
@@ -480,8 +492,8 @@ take_damage( list damage, key id )       // Process taking damage
             vulnerableUntil = llListStatistics( LIST_STAT_MAX,
                 [ vulnerableUntil, statusUntil ] );
         }
-        if ( attackFlags & IMMOBILE_MASK ) {
-            statusFlags = statusFlags | IMMOBILIZE_MASK;
+        if ( attackFlags & RESTRAIN_MASK ) {
+            statusFlags = statusFlags | RESTRAINED_MASK;
             restrainedUntil = llListStatistics( LIST_STAT_MAX,
                 [ restrainedUntil, statusUntil ] );
         }
@@ -491,7 +503,7 @@ take_damage( list damage, key id )       // Process taking damage
                 llDumpList2String( [ "trgt", id ], LINK_DELIM ),
                 llGetKey() );
             llWhisper( key2channel( llGetOwner() ),
-                llDumpList2String( [ llGetOwner(), "a!tgt", id ], 
+                llDumpList2String( [ llGetOwner(), "a!tgt", llGetOwnerKey(id) ], 
                     ACT_DELIM ) 
                 );
         }
@@ -532,12 +544,6 @@ set_stunned( integer stun )
     }
 }
 
-ask_for_damage( key who ) {
-    // Ask the meter what damage should be
-    llRegionSay( key2channel( who ), llDumpList2String(
-        [ who, "a!hit" ], ACT_DELIM ) );
-}
-
 use_focus( list drain )                     // Expend power for abilities
 {
     if ( get_flag( PEACE_MASK ) ) return;
@@ -561,12 +567,16 @@ use_focus( list drain )                     // Expend power for abilities
     }
 }
 
+/* 
 set_flag( integer mask )                    // Set a status flag
 {
     vector flags = retrieve( DEFENSES );
-    flags.z = (integer)flags.z | mask;
-    store( flags, DEFENSES );
-}
+    if ( !( (integer)flags.z & mask ) ) {
+        flags.z = (integer)flags.z | mask;
+        store( flags, DEFENSES );
+    }
+} 
+*/
 
 integer get_flag( integer mask )
 {
@@ -604,7 +614,6 @@ update_resources( vector resources )        // Clamp and update resources
     if ( resources.z > rec.y ) {
         resources.z = rec.y;
     }
-    if ( resources.y < 0.0 ) resources.y = 0.0;
     if ( llVecDist( resources, retrieve( SMF ) ) > 0.1 ) {
         store( resources, SMF );
     }
@@ -623,20 +632,24 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     integer status = (integer)resources.x;
     float scale = 5.0;
+    //if ( (integer)defenses.z & COMBAT_MASK ) {
+    //    scale = 1.0;
+    //}
 
     // Remove conditions here
-    if ( ( status & STUNNED_MASK ) && ( now > stunnedUntil ) ) {
+    if ( ( status & STUNNED_MASK ) && 
+        (( now > stunnedUntil ) || ( (integer)defenses.z & TURN_MASK )) ) {
         status = status & ~STUNNED_MASK;
         llMessageLinked( LINK_ROOT, UI_MASK, "unbusy", llGetOwner() );
     }
-    if ( ( status & DISABLEED_MASK ) && ( now > woundedUntil ) ) {
-        status = status & ~DISABLEED_MASK;
+    if ( ( status & WOUNDED_MASK ) && ( now > woundedUntil ) ) {
+        status = status & ~WOUNDED_MASK;
     }
     if ( ( status & VULNERABLE_MASK ) && ( now > vulnerableUntil ) ) {
         status = status & ~VULNERABLE_MASK;
     }
-    if ( ( status & IMMOBILIZE_MASK ) && ( now > restrainedUntil ) ) {
-        status = status & ~IMMOBILIZE_MASK;
+    if ( ( status & RESTRAINED_MASK ) && ( now > restrainedUntil ) ) {
+        status = status & ~RESTRAINED_MASK;
     }
     if ( ( (integer)defenses.z & INVULNERABLE_MASK ) && 
         ( now > invulnerableUntil ) ) 
@@ -651,21 +664,21 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     // Recover attributes
     if ( llVecDist( attributes, baseAttributes ) > 0.1 ) {
-        if ( baseAttributes.x > attributes.x && ( status ^ DISABLEED_MASK )) {
+        if ( baseAttributes.x > attributes.x && ( status ^ WOUNDED_MASK )) {
             attributes.x = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.x, attributes.x + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.x < attributes.x ) {
             attributes.x = llListStatistics( LIST_STAT_MAX,
                 [ baseAttributes.x, attributes.x - ( scale / 5.0 ) ] );
         }
-        if ( baseAttributes.y > attributes.y && ( status ^ DISABLEED_MASK )) {
+        if ( baseAttributes.y > attributes.y && ( status ^ WOUNDED_MASK )) {
             attributes.y = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.y, attributes.y + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.y < attributes.y ) {
             attributes.y = llListStatistics( LIST_STAT_MAX,
                 [ baseAttributes.y, attributes.y - ( scale / 5.0 ) ] );
         }
-        if ( baseAttributes.z > attributes.z && ( status ^ DISABLEED_MASK )) {
+        if ( baseAttributes.z > attributes.z && ( status ^ WOUNDED_MASK )) {
             attributes.z = llListStatistics( LIST_STAT_MIN,
                 [ baseAttributes.z, attributes.z + ( scale / 5.0 ) ] );
         } else if ( baseAttributes.x < attributes.x ) {
@@ -677,7 +690,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
 
     // Set focus
     float oFocus = resources.z;
-    if ( resources.z < attributes.y && ( status ^ DISABLEED_MASK ) 
+    if ( resources.z < attributes.y && ( status ^ WOUNDED_MASK ) 
         && !( (integer)defenses.z & COMBAT_MASK ) ) {
         resources.z += llListStatistics( LIST_STAT_MAX, 
             [ 0, rec.x * scale ] );
@@ -695,7 +708,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
     
     // Set morale
     if ( attributes.y + attributes.x - resources.y > 0.1 && 
-        ( status ^ DISABLEED_MASK )) 
+        ( status ^ WOUNDED_MASK )) 
     {
         resources.y += llListStatistics( LIST_STAT_MAX,
             [ 0, llFloor( rec.z * scale ) ] );
@@ -705,7 +718,7 @@ resting_recovery()                          // Periodic recovery & housekeeping
     }
     
     if ( rec.y < ( attributes.y + attributes.z ) && 
-        ( status ^ DISABLEED_MASK )) 
+        ( status ^ WOUNDED_MASK )) 
     {
         rec.y += ( attributes.y + attributes.z ) * 0.001 * scale;
         if ( rec.y > ( attributes.y + attributes.z ) ) {
@@ -713,27 +726,30 @@ resting_recovery()                          // Periodic recovery & housekeeping
         }
         store( rec, RECOVERY );
     }
-        
-    // Set Arousal
-    if ( needs.y ) {
-        needs.y -= rec.x * 0.01 * scale;
-        if ( needs.y < 0.0 ) needs.y = 0.0;
-        if ( refractory && needs.y > attributes.x ) {
-            needs.y = attributes.x;
-        }
+    
+    if ( needs.y > 0.0 ) {
+        needs.y = needs.y - 0.1 * scale;
         store( needs, NEEDS );
     }
     
+    attackers = "";    
     update_resources( <status, (integer)resources.y, (integer)resources.z > );
     llSetTimerEvent( scale );
 }
 
-key turn_request = NULL_KEY;
-get_timer()
-{
-    turn_request = llReadKeyValue( "Act-turnLength" );
+toggle_act_mode() {
+    vector defenses = retrieve( DEFENSES );
+    defenses.z = (integer)defenses.z ^ SEX_MASK;
+    store( defenses, DEFENSES );
+    key texture = ACT_ICON;
+    if ( (integer)defenses.z & SEX_MASK ) {
+        texture = SEX_ACT_ICON;
+    }
+    llSetLinkPrimitiveParamsFast( actMenuPrim,
+        [ PRIM_TEXTURE, DISPLAY_FACE, texture, <1, 1, 1>, 
+            ZERO_VECTOR, 0.0 ]
+        );
 }
-
 // ===========================================================================
 // Basic Act! functions
 
@@ -747,7 +763,8 @@ pong()
             llGetColor( RDI ) * 0xFF,
             llGetColor( DEFENSES ) * 0xFF,
             llGetColor( COMBAT ) * 0xFF,
-            llGetColor( RECOVERY ) * 0xFF ]
+            llGetColor( RECOVERY ) * 0xFF,
+            llGetColor( NEEDS ) * 0xFF ]
         , ACT_DELIM ) );
 }
 
@@ -780,109 +797,6 @@ store( vector store, integer face )
 vector retrieve( integer face )
 {
     return llGetColor( face ) * 0xFF;
-}
-
-// ===========================================================================
-// Update prim level bars
-
-integer moralePrim;
-integer focusPrim;
-integer statesPrim;
-
-string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
-string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
-string DAMAGED = "____________________";
-string SPACER = "                        ";
-integer MAX_TICKS = 15;
-vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
-vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
-vector AROUSAL_COLOR = <1.0, 0.3333, 0.3333>;
-
-string HUDmode;
-
-list showFocusModes =                   // Show focus bar in these modes
-    [ "combat", "construct", "Act!" ];
-integer showFocus = TRUE;               // Show the focus bar or not
-
-set_bar_level( float current, float attrib, float max, integer prim, vector color, 
-    integer line )
-{
-    string bar;
-    float ratio;
-    float maximum;
-    attrib = (float)llFloor( attrib );
-    max = (float)llFloor( max );
-    
-    if ( current < 0 ) current = 0.0;
-    if ( attrib > 0 ) {
-        ratio = ( current / attrib );
-        maximum = ( max / attrib );
-    }
-    integer level = (integer)( ratio * (float)MAX_TICKS );
-    integer limit = (integer)( maximum * (float)MAX_TICKS );
-    if ( level ) {
-        bar = llGetSubString( SOLID, 0, level - 1 );
-    }
-    if ( level < limit ) {
-        bar += llGetSubString( HOLLOW, 0, limit - level - 1 );
-    }
-    if ( limit < MAX_TICKS ) {
-        bar += llGetSubString( DAMAGED, 0, MAX_TICKS - limit - 1 );
-    }
-    if ( line ) bar = bar + SPACER;
-    else bar = SPACER + bar;
-    llSetLinkPrimitiveParamsFast( prim, [ PRIM_TEXT, bar, color, 1.0 ] );
-    // llSay( 0, llDumpList2String( [ current, attrib, max, level, limit ], "/" ) );
-}
-
-update_display()
-{
-    vector srp = retrieve( SMF );
-    vector rdi = retrieve( RDI );
-    vector rec = retrieve( RECOVERY );
-    vector defenses = retrieve( DEFENSES );
-    vector needs = retrieve( NEEDS );
-    
-    if ( needs.y < 1.0 ) {
-        set_bar_level( needs.y, 1.0, 1.0,
-            moralePrim, AROUSAL_COLOR, 1 ); 
-    } else {
-        set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-            moralePrim, MORALE_COLOR, 1 ); 
-    }
-    set_bar_level( srp.z, rdi.y + rdi.z, rec.y,
-        focusPrim, FOCUS_COLOR, 0 );
-    integer states = (integer)srp.x;
-    list status;
-    if ( states & STUNNED_MASK ) {
-        status += "Stn";
-    }
-    set_stunned( states & STUNNED_MASK );
-    if ( states & DISABLEED_MASK ) {
-        status += "Wnd";
-    }
-    if ( states & IMMOBILIZE_MASK ) {
-        status += "Res";
-    }
-    set_restrained( states & IMMOBILIZE_MASK );
-    if ( states & VULNERABLE_MASK ) {
-        status += "Vul";
-    }
-    if ( (integer)defenses.z & COMBAT_MASK ) {
-        status += "Cbt";
-    }
-    if ( (integer)defenses.z & INVULNERABLE_MASK ) {
-        status += "Inv";
-    }
-    if ( rec.y < rdi.y + rdi.z ) {
-        status += "Fat";
-    }
-    if ( states & DEFEATED_MASK ) {
-        status = ["?????? Defeated ??????"];
-    }
-    llSetLinkPrimitiveParams( statesPrim, 
-        [ PRIM_TEXT, llDumpList2String( status, " " ) + "\n ",
-            <1.0, 0.625, 0.625>, 1.0 ] );
 }
 
 integer LIT_FACE = 0;
@@ -939,27 +853,10 @@ integer myChannel;                      // My listener channel
 integer myListen;                       // Unique listener
 string myHeader;                        // Header for messages sent to me
 
-integer CHAT_CHANNEL = 9;               // Channel to chat on
-integer chatListen;                     // Chat listener
-string THIS_NAME = "Act!";              // Proper name of the prim
-
 string ownerHit;                        // Listen prefix for damage
 string NO_DAMAGE = "";                  // No damage pending
 
-send( integer dest,list message ) {
-    if ( dest < -5 ) {
-        llSay( key2channel( llGetOwner() ), 
-            llDumpList2String( message, ACT_DELIM ) );
-    } else if ( dest == -5 ) {
-        llSay( key2channel( llGetOwner() ),
-            llDumpList2String( message, ACT_DELIM ) );
-    } else {
-        llMessageLinked( dest, RP_MASK, 
-            llDumpList2String( message, LINK_DELIM ), llGetOwner() );
-    }
-}
-
-string menuItems = "Pick Char, Statistics, Morale & Focus Messages";
+string menuItems = "Reload, Statistics, Say Status";
 string menuCommands = "act!§char, act!§stat, act!§smesg";
 
 integer key2channel( key who ) {
@@ -977,24 +874,26 @@ default
 {
     state_entry()
     {
+        llSetRemoteScriptAccessPin( 0 );
         myHeader = (string)llGetOwner() + ACT_DELIM;
         myChannel = key2channel( llGetOwner() );
         
         list prims = get_link_numbers_for_names( 
-            ["act!:sayic", "act!:think", "combat", "target", 
-            "trgt:00000000-0000-0000-0000-000000000000", "menu",
-            "morale", "focus", "states", "act!:peace" ] );
-        combatPrim = llList2Integer( prims, 2 );
-        targetPrim = llList2Integer( prims, 3 );
-        teamPrim = llList2Integer( prims, 4 );
-        menuPrim = llList2Integer( prims, 5 );
-        moralePrim = llList2Integer( prims, 6 );
-        focusPrim = llList2Integer( prims, 7 );
-        statesPrim = llList2Integer( prims, 8 );
-        peacePrim = llList2Integer( prims, 9 );
+            ["combat", "target", 
+            "teamList", "menu", "act!^peace",
+            "act!:amenu" ] );
+        combatPrim = llList2Integer( prims, 0 );
+        targetPrim = llList2Integer( prims, 1 );
+        teamPrim = llList2Integer( prims, 2 );
+        menuPrim = llList2Integer( prims, 3 );
+        peacePrim = llList2Integer( prims, 4 );
+        actMenuPrim = llList2Integer( prims, 5 );
         
         set_prim_lit( peacePrim, !useActDamage );
         set_target( NULL_KEY );
+        
+        clear_flag( TURN_MASK );
+        clear_flag( COMBAT_MASK );
         
         vector srp = retrieve( SMF );
         update_resources( < 0.0, srp.y, srp.z > );
@@ -1002,30 +901,11 @@ default
         {
             llRequestPermissions( llGetOwner(), PERMISSION_TAKE_CONTROLS );
             myListen = llListen( myChannel, "", NULL_KEY, "" );
+            llSetTimerEvent( 5.0 );
         }
-        get_timer();
-        // llWhisper( DEBUG_CHANNEL, llGetScriptName() + " " +
-        //     (string)llGetUsedMemory() + " kb used" );
-    }
-    
-    dataserver( key id, string data )
-    {
-        integer error_value = (integer)llGetSubString(data, 0, 0);
-        data = llGetSubString(data, 2, -1);
-        if ( id == turn_request ) {
-            if ( !error_value ) {
-                turn_length = (float)llJsonGetValue( data, ["turn"] );
-                defeated_time = (float)llJsonGetValue( data, ["defeated"] );
-                llSetTimerEvent( turn_length );
-            } else if ( error_value == XP_ERROR_THROTTLED ){
-                llSleep(5.0);
-                get_timer();
-            } else {
-                llSetTimerEvent( DEFAULT_TURN );
-                turn_length = DEFAULT_TURN;
-                defeated_time = DEFEATED_TIME;
-            }
-        }
+        /* llSay( DEBUG_CHANNEL, llGetScriptName() + " started " +
+            (string)llGetFreeMemory() + " bytes free." ); */
+        toggle_act_mode();
     }
     
     attach( key id )
@@ -1034,7 +914,7 @@ default
         {
             llRequestPermissions( id, PERMISSION_TAKE_CONTROLS );
             set_target( NULL_KEY );
-            get_timer();
+            llSetTimerEvent( 5.0 );
         }
     }
     
@@ -1054,8 +934,6 @@ default
     {
         if ( change & CHANGED_COLOR )
         {
-            update_display();
-            
             vector srp = retrieve( SMF );
             integer states = (integer)srp.x;
             if ( ( states & DEFEATED_MASK ) && useActDamage ) {
@@ -1087,6 +965,7 @@ default
                 // llOwnerSay( llGetScriptName() + " acting on " + cmd );
                 
                 if ( cmd == "a!hit" ) {
+                    // I got hit!
                     string dmg = llList2String( 
                         llGetLinkPrimitiveParams(
                             combatPrim, [ PRIM_DESC ] )
@@ -1099,6 +978,7 @@ default
                             );
                     }
                 } else if ( cmd == "a!cwp" || cmd == "a!rwp" ) {
+                    // Change of close or ranged weapon
                     list msg = [ "cmbt", "wpns" ];
                     if ( cmd == "a!cwp" ) msg += [ "melee" ];
                     else msg += [ "range" ];
@@ -1109,23 +989,19 @@ default
                         llDumpList2String( msg, LINK_DELIM ),
                         id );
                 } else if ( cmd == "a!tgt" ) {
+                    // Retarget
                     set_target( (key)llGetSubString( heard, 6, -1 ) );
                 } else if ( cmd == "a!png" ) {
+                    // Respond to ping with character sttus
                     pong();
                 } else if ( cmd == "a?tgt" ) {
+                    // Who's my target?
                     llRegionSay( myChannel, 
                         llDumpList2String( 
                             [ llGetOwner(), "a!tgt", get_target() ]
                             , ACT_DELIM ) );
-                } else if ( cmd == "a?grp" ) {
-                    string team = llList2String( 
-                        llGetLinkPrimitiveParams( teamPrim, [ PRIM_TEXT ] ),
-                        0 );
-                    llRegionSay( myChannel, 
-                        llDumpList2String( 
-                            [ llGetOwner(), "a!grp" ] + team
-                            , ACT_DELIM ) );
                 } else {
+                    // Pass on to other scripts
                     llMessageLinked( LINK_THIS, RP_MASK, 
                         llDumpList2String( [ "act!" ] + [ heard ],
                             LINK_DELIM ),
@@ -1142,12 +1018,9 @@ default
     
     timer()
     {
-        resting_recovery();
-    }
-    
-    state_exit()
-    {
-        llSetTimerEvent(0.0);
+        if ( !get_flag( TURN_MASK ) ) {
+            resting_recovery();
+        }
     }
 }
 
@@ -1155,28 +1028,24 @@ state defeated
 {
     state_entry()
     {
-        llSetTimerEvent( defeated_time );
+        llSetTimerEvent( KO_TIME );
         set_stunned( TRUE );
         set_restrained( TRUE );
-        string text = "Defeated\n ";
         vector rec = retrieve( RECOVERY );
         string name = llGetObjectDesc() + " (" + 
             llGetUsername( llGetOwner() ) + ") ";
         if ( rec.y == 0.0 ) {
             llSay( 0, name + "is exhausted and has been defeated." );
-            text = text + "Exhausted ";
         } else {
             llSay( 0, name + "is demoralized and has been defeated." );
         }
-        llSetLinkPrimitiveParams( statesPrim, 
-            [ PRIM_TEXT, text, <1.0, 0.625, 0.625>, 1.0 ] );
         vector smf = retrieve( SMF );
-        integer states = (integer)smf.x | STUNNED_MASK | IMMOBILIZE_MASK | 
+        integer states = (integer)smf.x | STUNNED_MASK | RESTRAINED_MASK | 
             DEFEATED_MASK;
         store( <states, 1.0, 1.0>, SMF );
         
         llWhisper( power_channel( llGetOwner() ),
-            llDumpList2String( [ "play", "defeated", DEFEATED_TIME ], CHAT_DELIM ) );
+            llDumpList2String( [ "play", "defeated", KO_TIME ], CHAT_DELIM ) );
     }
         
     link_message( integer sender, integer signal, string msg, key id )
@@ -1194,7 +1063,6 @@ state defeated
     {
         if ( change & CHANGED_COLOR )
         {
-            update_display();
             vector srp = retrieve( SMF );
             integer states = (integer)srp.x;
             if ( !( states & DEFEATED_MASK ) ) {
@@ -1205,10 +1073,7 @@ state defeated
     
     state_exit()
     {
-        llSetTimerEvent( 0.0 );
-        
-        llSetLinkPrimitiveParams( statesPrim, 
-            [ PRIM_TEXT, "", <1.0, 0.625, 0.625>, 1.0 ] );
+        llSetTimerEvent( 0. );
         
         llWhisper( power_channel( llGetOwner() ),
             llDumpList2String( [ "play", "defeated end", 0.0 ], CHAT_DELIM ) );
@@ -1217,4 +1082,3 @@ state defeated
             llGetUsername( llGetOwner() ) + ") rallies." );
     }
 }
-
