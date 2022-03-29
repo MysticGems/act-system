@@ -263,15 +263,17 @@ handle_command( integer sender, integer signal, string msg, key id )
                 }
             } else if ( cmd == "amenu" ) {
                 vector defenses = retrieve( DEFENSES );
+                string my_menuItems = menuItems;
+                string my_menuCommands = menuCommands;
                 if ( (integer)defenses.z & SEX_MASK ) {
-                    menuItems += ", Sex Act! Off";
+                    my_menuItems += ", Sex Act! Off";
                 } else {
-                    menuItems += ", Sex Act! On";
+                    my_menuItems += ", Sex Act! On";
                 }
-                menuCommands += ", act!§actmode";
+                my_menuCommands += ", act!§actmode";
                 llMessageLinked( menuPrim, RP_MASK, 
                     llDumpList2String( [ "menu", "Act! Menu",
-                        menuItems, menuCommands ], LINK_DELIM ),
+                        my_menuItems, my_menuCommands ], LINK_DELIM ),
                     id );
             } else if ( cmd == "point" ) {
                 key target = get_target();
