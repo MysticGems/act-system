@@ -5,11 +5,11 @@
 
 // Check this stuff for each installation
 string helpURL =                        // URL for web page
-    "http://mysticgems.wordpress.com/";
+    "http://github.com/MysticGems/act-system/wiki";
 vector DIM_COLOR = <0.5, 0.5, 0.5>;
 vector LIT_COLOR = <1.0, 0.5, 0.5>;
 list lightupButtons =                   // Buttons to light/dim when clicked
-    [ "act!:amenu", "act!:team:menu", "trvl:follow", 
+    [ "act!:team:menu", "trvl:follow", 
     "act!:focus", "help", "options", "ping" ];
 
 // Should be safe below here =================================================
@@ -28,6 +28,7 @@ list buttons;                           // Buttons shown on the menu
 list commands;                          // What the buttons mean
 integer replyTo;                        // Prim requesting the menu
 integer replyMask;                      // Mask for reply
+key target;
 
 integer menuChannel;                    // Menu listener channel
 integer menuHandle;                     // Menu listener handle
@@ -41,10 +42,12 @@ integer MAX_TICKS = 20;                 // Max ticks a button can be held
 integer MAX_MENU_ITEMS      = 10;
 string NEXT                 = ">>";
 string PREV                 = "<<";
+string CANCEL               = "[ CANCEL ]";
 float MENU_TIME             = 10.0;     // Time before a menu expires
 
 integer BROADCAST_MASK      = 0xFFF00000;
 integer RP_MASK             = 0x4000000;
+integer UI_MASK             = 0x80000000;
 
 string CHAT_DELIM = "|";
 string LINK_DELIM = "§";
@@ -56,16 +59,42 @@ string ACT_DELIM = ":";
 option_menu()
 {
     title = "Options";
-    buttons = [ "Help", "Diags", "RESET", "Flight", "Plugins" ];
-    commands = [ "help", "diag", "rset", "trvl§menu", "plug§menu" ];
+    buttons = [ "Powers", "Plugins", "Flight", "Help", "Diags", "RESET" ];
+    commands = [ "powers", "plug§menu", "trvl§menu",  "help", "diag", "rset" ];
     replyTo = LINK_SET;
     replyMask = BROADCAST_MASK;
     display_menu();
 }
 
+powers_menu()
+{
+    string name_prefix = "slot";
+    integer len = llStringLength( name_prefix ) - 1;
+    integer f = llGetNumberOfPrims();
+    integer pos = -1;
+    title = "Powers Management\nPick a slot n to manage";
+    replyMask = UI_MASK;
+    do {
+        if ( llGetSubString( llGetLinkName( f ), 0, len ) == name_prefix ) {
+            buttons += [ llGetLinkName( f ) ];
+            commands += [ "addpwr§" + (string)f ];
+        }
+    } while (--f > 0);
+    
+    display_menu();
+}
+
 display_menu()
 {
+    buttons += [ CANCEL ];
+    commands += [ "cancel" ];
+    // Sort the buttons like sane people. Thanks, Ugleh Ulrik.
+    buttons = llList2List( buttons, -3, -1 ) + llList2List( buttons, -6, -4 ) +
+        llList2List( buttons, -9, -7 ) + llList2List( buttons, -12, -10 );
+    commands = llList2List( commands, -3, -1 ) + llList2List( commands, -6, -4 ) +
+        llList2List( commands, -9, -7 ) + llList2List( commands, -12, -10 );
     start_menu_listen();
+    // llOwnerSay( llGetScriptName() + ": " + llList2CSV( buttons ) );
     if ( llGetListLength( buttons ) > MAX_MENU_ITEMS ) {
         llDialog( llGetOwner(), title, [ PREV ]
             + llList2List( buttons, menuIdx, menuIdx + MAX_MENU_ITEMS - 3 )
@@ -109,14 +138,51 @@ set_busy( integer isBusy )
 }
 
 integer targetPrim;
+float TARGET_RANGE = 20.0;
+
+lockon()
+{
+    integer filter = 0; // RC_REJECT_LAND | RC_REJECT_PHYSICAL | RC_REJECT_NONPHYSICAL;
+    // ed95715e-21e1-4096-85dc-20a6a9e8e2bc
+    vector camera = llGetCameraPos();
+    vector fwd = llRot2Fwd( llGetCameraRot() ) * TARGET_RANGE;
+    list hits = llCastRay( camera, camera + fwd, 
+        [
+            RC_DATA_FLAGS, RC_GET_ROOT_KEY
+            , RC_REJECT_TYPES, filter
+        ] );
+    if ( hits ) {
+        target = llList2Key( hits, 0 );
+        if ( llGetAgentSize( target ) != ZERO_VECTOR ) {
+            set_target( target );
+        } else {
+            // target may be a seat
+            llSensor( "", NULL_KEY, AGENT, TARGET_RANGE, PI );
+        }
+    }
+}
 
 set_target( key id )
 {
+    target = id;
     llSetLinkPrimitiveParamsFast( targetPrim,
         [ PRIM_DESC, (string)id ] );
     llMessageLinked( LINK_SET, BROADCAST_MASK, 
         llDumpList2String( [ "trgt", id ], LINK_DELIM ),
         llGetKey() );
+}
+
+key get_seat( key id ) {
+    list details = llGetObjectDetails( id, [ OBJECT_ROOT ] );
+    return llList2Key( details, 0 );
+}
+
+integer on_same_seat( key id, key my_root ) {
+    list details = llGetObjectDetails( id, [ OBJECT_ROOT ] );
+    if ( get_seat(id) == my_root ) {
+        return TRUE;
+    }
+    return FALSE;
 }
 
 list get_link_numbers_for_names(list namesToLookFor)
@@ -131,6 +197,18 @@ list get_link_numbers_for_names(list namesToLookFor)
         }
     } while (--f > 0);
     return linkNumbers;
+}
+
+// -------------------------------------------------------------------------
+// External command handling
+
+list EXTERNAL_COMMANDS = [];
+
+integer userChannel;
+integer userHandle;
+integer key2channel( key id )
+{
+    return -1 * (integer)( "0x" + llGetSubString(id, -10, -3));
 }
 
 // ===========================================================================
@@ -151,6 +229,8 @@ default
                 PERMISSION_TAKE_CONTROLS );
         }
         set_target( NULL_KEY );
+        userChannel = key2channel( llGetOwner() );
+        userHandle = llListen( userChannel, "", NULL_KEY, "" );
     }
     
     attach( key id )
@@ -220,8 +300,13 @@ default
             if ( button == "options" ) {
                 option_menu();
             } else if ( button == "ping" ) {
-                targeting = TRUE;
-                llSensor( "", NULL_KEY, AGENT, 96.0, PI_BY_TWO );
+                lockon();
+            } else if ( button == "inventory" ) {
+                llOwnerSay( "Inventory not yet implemented." );
+            } else if ( button == "quest" ) {
+                llOwnerSay( "Quest guide not yet implemented" );
+            } else if ( button == "cmbt:attack" || button == "cmbt:defend" ) {
+                llOwnerSay( "Sex Act! not yet implemented" );
             } else {
                 if ( !ticks ) {
                     if ( llGetTime() >= 0.5 ) {
@@ -245,16 +330,23 @@ default
         list msg = llParseString2List( message, [ LINK_DELIM ], []);
         string cmd = llList2String(msg, 0);
         
-        // llOwnerSay( llGetScriptName() + " " + message );
+        // llOwnerSay( llGetScriptName() + " " + cmd );
 
         if ( cmd == "menu" ) {
+            // llOwnerSay( llGetScriptName() + " " + message );
             title = llList2String( msg, 1 );
             buttons = llCSV2List( llList2String( msg, 2 ) );
             commands = llCSV2List( 
                 llDumpList2String( llList2List( msg, 3, -1 ), LINK_DELIM ) );
             replyTo = source;
             replyMask = flag;
+            // llOwnerSay( llGetScriptName() + " " + llList2CSV( buttons ) );
             display_menu();
+        } else if ( cmd == "powers" ) {
+            powers_menu();
+        } else if ( cmd == "addpwr" ) {
+            integer button = llList2Integer( msg, 1 );
+            llMessageLinked( llList2Integer( msg, 1 ), UI_MASK, "hotbr", llGetOwner() );
         } else if ( cmd == "help" ) {
             llLoadURL( llGetOwner(), "Act! HUD manual", helpURL );
         } else if ( cmd == "rset" ) {
@@ -282,6 +374,8 @@ default
                     menuIdx = 0;
                 }
                 display_menu();
+            } else if ( msg == CANCEL ) {
+                end_menu();
             } else {
                 integer i = llListFindList( buttons, [ msg ] );
                 if ( i > -1 ) {
@@ -294,7 +388,58 @@ default
                 }
                 end_menu();
             }
+        } else if ( channel == userChannel ) {
+            integer internal = FALSE;
+            
+            // Security checks here.  Make sure this is either for me, from my
+            // object, or from my override owner
+            key from = llGetOwnerKey( id );
+            internal = ( from == llGetOwner() );
+            
+            if ( llGetSubString( msg, 0, 35 ) == (string)llGetOwner() ) {
+                msg = llGetSubString( msg, 37, -1 );
+            } else if ( !internal ) {
+                return;
+            }
+            
+            // Pass on the command if it passes security
+            list parsed = llParseStringKeepNulls( msg, [ CHAT_DELIM ], [] );
+            string cmd = llToLower( llList2String( parsed, 0 ) );
+            
+            if ( internal || ( llListFindList( EXTERNAL_COMMANDS, [ cmd ] ) > -1 ) )
+            {
+                llMessageLinked( LINK_SET, BROADCAST_MASK,
+                    llDumpList2String( parsed, LINK_DELIM ), id );
+            }
         }
+    }
+    
+    sensor( integer num ) {
+        // See if avatars in range are sitting on the target
+        list sitters;
+        integer i;
+        integer onSeat;
+        integer found = FALSE;
+        
+        // TODO: Handle multiple other sitters
+        while ( i < num ) {
+            onSeat = on_same_seat( llDetectedKey(i), target );
+            if ( onSeat == TRUE ) {
+                target = llDetectedKey(i);
+                set_target( target );
+                found = TRUE;
+            }
+            i++;
+        }
+        if (!found) {
+            target = NULL_KEY;
+            set_target( target );
+        }
+    }
+    
+    no_sensor() {
+        target = NULL_KEY;
+        set_target( NULL_KEY );
     }
     
     control( key id, integer held, integer change )
@@ -303,70 +448,12 @@ default
             if ( held ) {
                 llResetTime();
             } else if ( llGetAndResetTime() > 0.25 ) {
-                targeting = TRUE;
-                llSensor( "", NULL_KEY, AGENT, 
-                    96.0, PI_BY_TWO );
+                lockon();
             }
         }
         if ( ( ~held & change & CONTROL_ML_LBUTTON ) )
         {
-            targeting = TRUE;
-            llSensor( "", NULL_KEY, AGENT, 
-                96.0, PI_BY_TWO );
-        }
-    }
-
-    sensor( integer n )
-    {
-        // Adjust position for eye level
-        vector mypos = llGetCameraPos();
-        // Current forward vector
-        vector fwd = llRot2Fwd(llGetCameraRot());
-        integer f = 0;
-        key id;
-        vector pos;
-        list boxList;
-        vector box;
-        vector nearest;
-        float zDiff;
-        float xyDiff;
-        key target = NULL_KEY; // key of identified target
-        targeting = FALSE;
-        do {
-            id = llDetectedKey(f);
-            // This returns a list; we assume the avatar has
-            // a bounding box that is symmetrical about their axes
-            // and calculate its size based on the maximum corner.
-            // Diameter of the "cylinder" is based on width.
-            boxList = llGetBoundingBox(id);
-            pos = llDetectedPos(f);
-            box = llList2Vector(boxList, 1);
-            // Nearest point along the forward axis to the target's
-            // position
-            nearest = fwd * (fwd * (pos - mypos)) + mypos;
-            // Find the distances of this from target pos on the XY plane
-            // and the Z axis
-            zDiff = llVecMag(<0.0, 0.0, nearest.z> - <0.0, 0.0, pos.z>);
-            xyDiff = llVecMag(<nearest.x, nearest.y, 0.0> 
-                - <pos.x, pos.y, 0.0>);
-            if (xyDiff <= (box.y + box.x) / 2 && zDiff <= box.z) {
-                // projection of forward vector within box
-                target = id;
-                set_target( id );
-                llPlaySound( "46e2dd13-85b4-8c91-ab62-7d5c4dd16068", 0.5 );
-            }
-        } while (++f < n && target == NULL_KEY);
-        if ( target == NULL_KEY ) {
-            llSensor( "", NULL_KEY, ACTIVE | PASSIVE, 96.0, PI_BY_TWO );
-        }
-    }
-    
-    no_sensor()
-    {
-        if ( targeting ) {
-            targeting = FALSE;
-            llSensor( "", NULL_KEY, ACTIVE | PASSIVE, 96.0, PI_BY_TWO );
+            lockon();
         }
     }
 }
-
