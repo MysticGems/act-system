@@ -15,4 +15,4 @@ This project is still pre-release.
 
 --
 
-Second Life® is a trademark of Linden Research, Inc. Nothing here is not affiliated with or sponsored by Linden Research
+Second Life® is a trademark of Linden Research, Inc. Nothing here is affiliated with or sponsored by Linden Research
