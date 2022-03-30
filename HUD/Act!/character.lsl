@@ -23,9 +23,9 @@ integer NEEDS = 0;
 //  Face 1: Resilience, Drive, Insight
 //  Also stored in color of PRIM_POINT_LIGHT for easy reset after buff/debuff
 integer RDI = 1;
-//  Face 2: Injury status conditions, Morale, Focus
+//  Face 2: Injury status conditions, Endurance, Focus
 integer SMF = 2;
-//  Face 3: Defense Bonus, Damage Resistance, Combat status conditions
+//  Face 3: Resistance Bonus, Damage Resistance, Combat status conditions
 integer DEFENSES = 3;
 //  Face 4: Displayed face toward user; do not use
 //  Face 5: Power recovery rate, Max Power, Resolve recovery rate
@@ -254,11 +254,11 @@ sheet_to_chat()
     output += "[Resilience: " + (string)llRound( rdi.x / 0.64 )
         + "%] [Drive: " + (string)llRound( rdi.y / 0.64 )
         + "%] [Insight: " + (string)llRound( rdi.z / 0.64 ) + "%]";
-    output += "\n[Morale: " + (string)llRound( smf.y )
+    output += "\n[Endurance: " + (string)llRound( smf.y )
         + "/" + (string)llRound( rdi.y + rdi.x )
         + "] [Focus: " + (string)llRound(smf.z ) + "/"
         + (string)llRound( rdi.y + rdi.z ) + "]"
-        + " [Defense Bonus: " + (string)( llRound(def.x) ) + "]";
+        + " [Resistance Bonus: " + (string)( llRound(def.x) ) + "]";
     if ( traits != [] ) {
         output += "\n[Traits] " + llList2CSV( traits );
     }
@@ -296,7 +296,7 @@ announce( string text, integer public )
 // ===========================================================================
 // Update prim level bars
 
-integer moralePrim;
+integer endPrim;
 integer focusPrim;
 integer statesPrim;
 integer arousalPrim;
@@ -307,7 +307,7 @@ string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
 string DAMAGED = "____________________";
 string SPACER = "                            ";
 integer MAX_TICKS = 15;
-vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
+vector ENDURANCE_COLOR = <0.3333, 1.0, 0.3333>;
 vector AROUSAL_COLOR = <1.0, 0.5, 0.5>;
 vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
 
@@ -373,10 +373,10 @@ update_display()
     
     if ( (integer)defenses.z & SEX_MASK ) {
         set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-            moralePrim, AROUSAL_COLOR, 1 ); 
+            endPrim, AROUSAL_COLOR, 1 ); 
     } else {
         set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-            moralePrim, MORALE_COLOR, 1 ); 
+            endPrim, ENDURANCE_COLOR, 1 ); 
     }
     set_bar_level( srp.z, rdi.y + rdi.z, rec.y,
         focusPrim, FOCUS_COLOR, 0 );
@@ -458,10 +458,10 @@ default // Setup
     {
         llSetText( "", ZERO_VECTOR, 0.0 );
         list prims = get_link_numbers_for_names(
-            [ "menu", "states", "morale", "focus" ] );
+            [ "menu", "states", "endurance", "focus" ] );
         menuPrim = llList2Integer( prims, 0 );
         statesPrim = llList2Integer( prims, 1 );
-        moralePrim = llList2Integer( prims, 2 );
+        endPrim = llList2Integer( prims, 2 );
         focusPrim = llList2Integer( prims, 3 );
         llSetLinkPrimitiveParams( statesPrim, 
             [ PRIM_TEXT, "", <1.0, 0.625, 0.625>, 1.0 ] );
