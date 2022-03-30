@@ -1,0 +1,463 @@
+// ===========================================================================
+// Mystic Gems Contact Tracker                                               \
+// By Jack Abraham                                                        \__
+// ===========================================================================
+
+// Compile as Mono; we need the performance for the sort, and the memory gives
+// us more contacts tracked.
+
+integer MAX_TRACKS = 100;
+float REFRESH = 5.0;                    // Update screen every x seconds
+integer LIT_FACE = 0;
+integer DIM_FACE = 2;
+key owner;                              // Me
+list tracking;                          // Everyone we're tracking
+list displayKeys;                       // Avatars being displayed
+integer needClear = FALSE;              // Is anything on screen
+key group;                              // My group
+string mode = "";                       // Current sensor mode
+list displayPrims = [ LINK_THIS ];      // Prims used for text display
+string LINK_MSG_DELIM = "§";            // Communication field delimiter
+
+string searchName;
+integer searchHandle;
+
+list CLEAR_SCREEN = [ "clear screen" ];
+
+integer filter;                         // Filtering contacts?
+integer SAME_GROUP = 1;
+integer SAME_CREATOR = 2;
+integer SAME_OWNER = 3;
+integer FRIENDLY = 4;
+key suspect;                            // Key for filtering
+
+integer BROADCAST_MASK      = 0xFFF00000;
+integer SCAN_MASK           = 0x1000000;
+integer COMMUNICATION_MASK  = 0x10000000;
+integer filterPrim;
+integer menuPrim;
+integer targetPrim;
+integer searchPrim;
+
+sort()
+{
+    vector here = llList2Vector( 
+        llGetObjectDetails( owner, [ OBJECT_POS ] ), 0 );
+    displayKeys = [];
+            
+    integer i = 0;
+    integer nearCount = llGetListLength(tracking);
+    vector there;
+    
+    if ( mode == "bio" ) {
+        if ( llGetAgentInfo( owner ) & AGENT_SITTING ) {
+            displayKeys += [ 0, owner ];
+        }
+    }
+    
+    while( i < nearCount )
+    {
+        key obj = llList2Key(tracking, i);
+        there = llList2Vector( 
+            llGetObjectDetails( obj, [ OBJECT_POS ] ), 0 );
+        if( llKey2Name( obj ) != "" && there != ZERO_VECTOR ) 
+        {
+            if ( show_this_contact( obj ) && obj != owner ) {
+                float distance = llVecMag( there - here );
+                displayKeys += [ distance, obj]; 
+            }
+            ++i;
+        }
+        else
+        {
+            tracking = llDeleteSubList( tracking, i, i); 
+            nearCount = llGetListLength( tracking );
+        }
+    }
+    
+    displayKeys = llList2ListStrided( 
+        llDeleteSubList( llListSort(displayKeys,2,TRUE), 0, 0 ), 
+        0, -1, 2 );
+}
+
+integer show_this_contact( key id )
+{
+    key scanned;
+    if ( filter ) {
+        if ( llGetAgentSize(id) ) {
+            if ( filter == FRIENDLY || filter == SAME_GROUP )
+            {
+                if ( llSameGroup(id) ) {
+                    return TRUE;
+                }
+            }
+        } else {
+            if ( filter == FRIENDLY ) {
+                key objOwner = llGetOwnerKey( id );
+                if ( ( owner == objOwner ) || 
+                    ( objOwner == group ) || llSameGroup(id) )
+                {
+                    return FALSE;
+                }
+            } else if ( filter == SAME_OWNER ) {
+                if ( llGetOwnerKey( id ) != suspect ) {
+                    return FALSE;
+                }
+            } else if ( filter == SAME_CREATOR ) {
+                scanned =  llList2Key( 
+                    llGetObjectDetails( id,
+                        [ OBJECT_CREATOR ] ), 0 );
+                if ( scanned != suspect ) {
+                    return FALSE;
+                }
+            } else if ( filter == SAME_GROUP ) {
+                scanned =  llList2Key( 
+                    llGetObjectDetails( id,
+                        [ OBJECT_GROUP ] ), 0 );
+                if ( scanned != suspect ) {
+                    return FALSE;
+                }
+            } else if ( filter == SAME_CREATOR ) {
+                key scanned =  llList2Key( 
+                    llGetObjectDetails( id,
+                        [ OBJECT_CREATOR ] ), 0 );
+                if ( scanned != suspect ) {
+                    return FALSE;
+                }
+            }
+        }
+    }
+    return TRUE;
+}
+
+string message( list contents )
+{
+    return llDumpList2String( contents, LINK_MSG_DELIM );
+}
+
+integer UI_MASK             = 0x80000000;
+
+float elapsed; 
+display( string type )
+{
+    //llOwnerSay( llGetScriptName() + " display loop: " + type + " mode: " + mode);
+    //float elapsed = llGetTime();
+    if ( mode == "bio" ) {
+        tracking = llGetAgentList( AGENT_LIST_REGION, [] );
+    }
+    llSetTimerEvent( 0. );
+    sort();
+    
+    // Truncate to 16 lines for display
+    if(llGetListLength(displayKeys) > 16) 
+    {
+        displayKeys = llDeleteSubList(displayKeys,16,-1);
+    }
+    
+    if(llGetListLength(displayKeys) > 0)
+    {
+        llMessageLinked( LINK_THIS, UI_MASK, 
+            llDumpList2String( [ "contacts", 
+            llGetListLength( displayKeys ) ]
+            + displayKeys, LINK_MSG_DELIM ),
+            llGetOwner() );
+        needClear = TRUE;
+    }
+    else if ( needClear )
+    {
+        llMessageLinked( LINK_THIS, UI_MASK, 
+            llDumpList2String( CLEAR_SCREEN, LINK_MSG_DELIM ),
+            llGetOwner() );
+        needClear = FALSE;
+    }
+    
+    llSetTimerEvent( REFRESH );
+    //elapsed = llGetTime() - elapsed;
+    //llSetText( (string)llGetListLength( tracking ) + " contacts; " + (string)llGetFreeMemory() + "kb free; update " + (string)elapsed + " sec.", <1, 0.5, 0.5>, 1.0 );
+}
+
+filter_menu()
+{
+    suspect = NULL_KEY;
+    llMessageLinked( menuPrim, SCAN_MASK, llDumpList2String(
+        [ "menu"
+        , "Filters"
+        , llList2CSV( [ "Search", " ",
+            "Same Owner", "Same Group", "Same Creator", " ",
+            "Hide Friendly" ] )
+        , llList2CSV( [ "scan§search", "-",
+            "scan§filter§owner",
+            "scan§filter§group",
+            "scan§filter§creator" , "-",
+            "scan§filter§friendly" ] )
+        ], LINK_MSG_DELIM ),
+        llGetOwner() );
+}
+        
+name_match( key id, string name )
+{
+    integer match = is_match( llKey2Name( id ), name );
+    if ( ( llGetAgentSize( id ) != ZERO_VECTOR ) && !match ) {
+        match = is_match( llGetDisplayName( id ), name );
+    }
+    if ( match ) {
+        llMessageLinked( LINK_ROOT, COMMUNICATION_MASK,
+            llDumpList2String( 
+                [ "say", "Located " + searchName + "." ],
+                LINK_MSG_DELIM ),
+            llGetOwner() );
+        llMessageLinked( LINK_SET, BROADCAST_MASK,
+            llDumpList2String( [ "trgt", id ], 
+                LINK_MSG_DELIM ),
+            llGetOwner() );
+        searchName = "";
+        set_lit( searchPrim, FALSE );
+        llMessageLinked( LINK_ROOT, COMMUNICATION_MASK,
+            llDumpList2String(
+                [ "xcmd", "play", "end scan", 0.0, 
+                    llGetLinkKey( searchPrim ) ],
+                LINK_MSG_DELIM ),
+            llGetOwner() );
+    }
+}
+    
+integer is_match( string name, string pattern )
+{
+    return ( llSubStringIndex( llToLower( name ), llToLower( pattern ) ) == 0 );
+}
+
+set_lit( integer prim, integer on )
+{
+    if ( prim <= LINK_ROOT ) {
+        return;
+    }
+    if ( on ) {
+        llSetLinkColor( prim, llList2Vector( llGetLinkPrimitiveParams(
+            LINK_ROOT, [ PRIM_COLOR, LIT_FACE ] ), 0 ), ALL_SIDES );
+    } else {
+        llSetLinkColor( prim, llList2Vector( llGetLinkPrimitiveParams(
+            LINK_ROOT, [ PRIM_COLOR, DIM_FACE ] ), 0 ), ALL_SIDES );
+    }
+}
+
+key get_target()
+{
+    return (key)llList2String( 
+        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
+        , 0 );
+}
+
+list get_link_numbers ( list names )
+{
+    integer c = llGetNumberOfPrims() + 1;
+    integer i = -1;
+    while ( c-- >= 0 ) {
+        i = llListFindList( names, [ llGetLinkName( c ) ] );
+        if ( i > -1 ) {
+            names = llListReplaceList( names, [c], i, i );
+        }
+    }
+    return names;
+}
+
+init()
+{
+    owner = llGetOwner();
+    tracking =[];
+    displayKeys = [];
+    llRequestPermissions(owner,PERMISSION_TAKE_CONTROLS);
+    group = llList2Key(
+        llGetObjectDetails( llGetKey(), [ OBJECT_GROUP ] ), 0 );
+
+    integer i;
+    integer c;
+    list names;
+    c = llGetNumberOfPrims() + 1;
+    list parsed;
+    string name;
+    for ( i=c; i > 0; --i )
+    {
+        parsed = llParseString2List(llGetLinkName(i),[":"],[]);
+        name = llToLower( llList2String( parsed, 0 ) );
+        if ( name == "display" )
+        {
+            displayPrims += [ i ];
+        }
+    }
+    list prims = get_link_numbers( [ "scan:filter", "menu", "target" ] );
+    filterPrim = llList2Integer( prims, 0 );
+    menuPrim = llList2Integer( prims, 1 );
+    targetPrim = llList2Integer( prims, 2 );
+    searchPrim = llList2Integer( prims, 0 );
+    set_lit( filterPrim, FALSE );
+    set_lit( searchPrim, FALSE );
+    llSetText( "", ZERO_VECTOR, 0.0 );
+}
+
+default
+{
+    state_entry()
+    {
+        init();
+        //llWhisper( DEBUG_CHANNEL, llGetScriptName() + " initialized; "
+        //    + (string)llGetFreeMemory() + " bytes free." );
+    }
+    
+    attach( key id )
+    {
+        if ( id != NULL_KEY ) {
+            llResetScript();
+        }
+    }
+    
+    link_message( integer s, integer i, string m, key id )
+    {
+
+        list parsed = llParseString2List( m, [LINK_MSG_DELIM], [] );
+        string cmd = llList2String( parsed, 0 );
+
+        // llOwnerSay( "[" + llGetScriptName() + ":" + (string)i + ":" + llKey2Name(id) + "]: " + llDumpList2String( parsed, "\n" ));
+        if ( cmd == "detected" ) {        
+            // llSetTimerEvent(0.0);
+            integer tracks = llList2Integer( parsed, 1 ); 
+            integer i;
+            for(i=2; i <= (tracks + 1); ++i)
+            {
+                string detected = llList2String( parsed, i );
+                if( llListFindList( tracking, [ detected ] ) == -1)  
+                {
+                    while( llGetListLength(tracking) >= MAX_TRACKS ) 
+                    {
+                        // llOwnerSay( "Droping contacts; " 
+                        //     + (string)llGetFreeMemory() );
+                        tracking = 
+                            llDeleteSubList( tracking, 0, 0 );
+                    }
+                    tracking += [ detected ];
+                    if ( searchName ) {
+                        name_match( detected, searchName );
+                    }
+                }
+            }
+            display( "detected" );
+        } else if ( cmd == "scan" ) {
+            // llOwnerSay( "[" + llGetScriptName() + ":" + (string)i + ":" + llKey2Name(id) + "]" + m );
+            cmd = llList2String( parsed, 1 );
+            if ( cmd == "mode" ) {
+                tracking = [];
+                displayKeys = [];
+                if ( llList2String( parsed, 2 ) != mode ) {
+                    mode = llList2String( parsed, 2 );
+                } else {
+                    mode = "";
+                }
+                llMessageLinked( LINK_THIS, UI_MASK, 
+                    llDumpList2String( CLEAR_SCREEN, LINK_MSG_DELIM ),
+                    llGetOwner() );
+                llSetTimerEvent( 1.0 );
+            } else if ( cmd == "search" ) {
+                set_lit( searchPrim, TRUE );
+                llListenRemove( searchHandle );
+                integer channel = llGetUnixTime();
+                searchHandle = llListen( channel, "", llGetOwner(), "" );
+                llTextBox( llGetOwner(), "What am I searching for?", channel );
+            } else if ( cmd == "list" ) {
+                integer i = llGetListLength( tracking ) -1;
+                string reply = llDumpList2String( llList2List( parsed, 2, -1 ),
+                    LINK_MSG_DELIM );
+                llOwnerSay( llGetScriptName() + " received list request" );
+                for ( ; i > 0; i-- ) {
+                    llSleep( 0.1 );
+                    llMessageLinked( s, i, reply, llList2Key( tracking, i ) );
+                }
+            } else if ( cmd == "filter" ) {
+                cmd = llList2String( parsed, 2 );
+                if ( cmd == "friendly" ) {
+                    filter = FRIENDLY;
+                } else if ( cmd == "owner" ) {
+                    filter = SAME_OWNER;
+                    suspect = get_target();
+                    if ( llGetAgentSize(suspect) == ZERO_VECTOR ) {
+                        suspect = llGetOwnerKey( suspect );
+                    }
+                } else if ( cmd == "group" ) {
+                    filter = SAME_GROUP;
+                    suspect = llList2Key( llGetObjectDetails( get_target(),
+                        [ OBJECT_GROUP ] ), 0 );
+                } else if ( cmd == "creator" ) {
+                    filter = SAME_CREATOR;
+                    suspect = get_target();
+                    if ( llGetAgentSize(suspect) == ZERO_VECTOR ) {
+                        suspect = llList2Key( llGetObjectDetails( suspect,
+                            [ OBJECT_CREATOR ] ), 0 );
+                    }
+                } else if ( filter ) {
+                    filter = FALSE;
+                } else if ( searchName ) {
+                    searchName = "";
+                } else {
+                    filter_menu();
+                    // return TRUE;
+                }
+                if ( filter || searchName != "" ) {
+                    set_lit( filterPrim, TRUE );
+                } else {
+                    set_lit( filterPrim, FALSE );
+                }
+                display( "filter" );
+            }
+        } else if ( cmd == "display off" ) {
+            tracking = [];
+            displayKeys = [];
+            mode = "";
+            llMessageLinked( LINK_THIS, UI_MASK, 
+                llDumpList2String( CLEAR_SCREEN, LINK_MSG_DELIM ),
+                llGetOwner() );
+            llSetTimerEvent( 0.0 );
+        } else if ( cmd == "diag" ) {
+            llSay( 0, "CONTACT MANAGER\n"
+                + (string)llGetFreeMemory() + " bytes free." );
+        } else if ( cmd == "rset" ) {
+            llResetScript();
+        }
+    }
+    
+    // Search mode functions
+    listen( integer channel, string who, key id, string msg )
+    {
+        llListenRemove( searchHandle );
+        if ( (key)msg != NULL_KEY ) {
+            llMessageLinked( LINK_SET, BROADCAST_MASK,
+                llDumpList2String( [ "trgt", msg ], 
+                    LINK_MSG_DELIM ),
+                llGetOwner() );
+            set_lit( searchPrim, FALSE );
+        } else {
+            searchName = msg;
+            llMessageLinked( LINK_ROOT, COMMUNICATION_MASK,
+                llDumpList2String( 
+                    [ "IM", "Searching for " + searchName + "." ],
+                    LINK_MSG_DELIM ),
+                llGetOwner() );
+            set_lit( searchPrim, TRUE );
+            integer i = llGetListLength( tracking );
+            for ( ; i > 0 && searchName != ""; i-- ) {
+                name_match( llList2Key( tracking, i ), searchName );
+            }
+        }
+    }
+    
+    timer()
+    {
+        display( "timer" );
+    }
+    
+    // Sucks if sensors die in stores and clubs.
+    run_time_permissions(integer perm)
+    {
+        if( perm & PERMISSION_TAKE_CONTROLS )
+        {
+            llTakeControls( 1024, TRUE, TRUE);
+        }
+    }
+}

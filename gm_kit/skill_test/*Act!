@@ -1,0 +1,5 @@
+trait = willpower
+success message = You did it!
+fail message = You failed.
+busy = 1.5
+start message = Checking...
