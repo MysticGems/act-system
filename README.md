@@ -1,6 +1,6 @@
-The current combat meters used in Second Life fall short of being a true role-play system, and frequently lack flexibility.  
+The current combat meters used in Second Life® fall short of being a true role-play system, and frequently lack flexibility.  
 They are usually tied to a particular genre of play; even the popular DCS2 system doesn't allow the kind of flexibility 
-needed for superheroic and "roll your own genre" play.
+needed for superheroic and "roll your own genre" play, and doesn't really address anything other than combat.
 
 The Act! System will attempt to fill this role using a serverless set of attachments and experience tools.  Design priorities 
 (in no particular order) are:
@@ -13,3 +13,6 @@ The Act! System will attempt to fill this role using a serverless set of attachm
 
 This project is still pre-release.
 
+--
+
+Second Life® is a trademark of Linden Research, Inc. Nothing here is not affiliated with or sponsored by Linden Research
