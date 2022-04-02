@@ -14,8 +14,8 @@ string BLANK_CHARACTER = "( Unused )";
 string RESOURCE_SCRIPT = "resources.lsl";
 
 float charLevel = 64.0;                 // Attribute scale, max 128
-float TRAIT_COST = 0.025;               // Cost of a Trait
-float SKILL_COST = 0.025;               // Cost of Skill +1.0
+float trait_cost = 0.025;               // Cost of a Trait
+float skill_cost = 0.025;               // Cost of Skill +1.0
 
 // Values stored in faces:
 //  Face 0: Nutrition, Arousal, 
@@ -23,9 +23,9 @@ integer NEEDS = 0;
 //  Face 1: Resilience, Drive, Insight
 //  Also stored in color of PRIM_POINT_LIGHT for easy reset after buff/debuff
 integer RDI = 1;
-//  Face 2: Injury status conditions, Morale, Focus
+//  Face 2: Injury status conditions, Endurance, Focus
 integer SMF = 2;
-//  Face 3: Defense Bonus, Damage Resistance, Combat status conditions
+//  Face 3: Resistance Bonus, Damage Resistance, Combat status conditions
 integer DEFENSES = 3;
 //  Face 4: Displayed face toward user; do not use
 //  Face 5: Power recovery rate, Max Power, Resolve recovery rate
@@ -33,7 +33,6 @@ integer RECOVERY = 5;
 // Face 6: Damage modifier, DB modifier, Attack flags
 // License key in texture field
 integer COMBAT = 6;
-integer CHARKEY = 6;
 
 vector attributes;
 list traits = [];
@@ -182,8 +181,8 @@ store_all_values()
 {
     attributes = llVecNorm( attributes ) * charLevel;
     attributes *= 1.0 - 
-        ( TRAIT_COST * (float)llGetListLength( traits )) -
-        ( SKILL_COST * (float)( llListStatistics( LIST_STAT_SUM, skills ) ));
+        ( trait_cost * (float)llGetListLength( traits )) -
+        ( skill_cost * (float)( llListStatistics( LIST_STAT_SUM, skills ) ));
     attributes = <llRound( attributes.x ),
         llRound( attributes.y ),
         llRound( attributes.z )>;
@@ -254,11 +253,11 @@ sheet_to_chat()
     output += "[Resilience: " + (string)llRound( rdi.x / 0.64 )
         + "%] [Drive: " + (string)llRound( rdi.y / 0.64 )
         + "%] [Insight: " + (string)llRound( rdi.z / 0.64 ) + "%]";
-    output += "\n[Morale: " + (string)llRound( smf.y )
+    output += "\n[Endurance: " + (string)llRound( smf.y )
         + "/" + (string)llRound( rdi.y + rdi.x )
         + "] [Focus: " + (string)llRound(smf.z ) + "/"
         + (string)llRound( rdi.y + rdi.z ) + "]"
-        + " [Defense Bonus: " + (string)( llRound(def.x) ) + "]";
+        + " [Resistance Bonus: " + (string)( llRound(def.x) ) + "]";
     if ( traits != [] ) {
         output += "\n[Traits] " + llList2CSV( traits );
     }
@@ -296,7 +295,7 @@ announce( string text, integer public )
 // ===========================================================================
 // Update prim level bars
 
-integer moralePrim;
+integer endPrim;
 integer focusPrim;
 integer statesPrim;
 integer arousalPrim;
@@ -305,9 +304,8 @@ integer hungerPrim;
 string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
 string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
 string DAMAGED = "____________________";
-string SPACER = "                            ";
 integer MAX_TICKS = 15;
-vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
+vector ENDURANCE_COLOR = <0.3333, 1.0, 0.3333>;
 vector AROUSAL_COLOR = <1.0, 0.5, 0.5>;
 vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
 
@@ -342,8 +340,6 @@ set_bar_level( float current, float attrib, float max, integer prim, vector colo
     if ( limit < MAX_TICKS ) {
         bar += llGetSubString( DAMAGED, 0, MAX_TICKS - limit - 1 );
     }
-    if ( line ) bar = bar + SPACER;
-    else bar = SPACER + bar;
     llSetLinkPrimitiveParamsFast( prim, [ PRIM_TEXT, bar, color, 1.0 ] );
     // llSay( 0, llDumpList2String( [ current, attrib, max, level, limit ], "/" ) );
 }
@@ -373,10 +369,10 @@ update_display()
     
     if ( (integer)defenses.z & SEX_MASK ) {
         set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-            moralePrim, AROUSAL_COLOR, 1 ); 
+            endPrim, AROUSAL_COLOR, 1 ); 
     } else {
         set_bar_level( srp.y, rdi.y + rdi.x, rdi.y + rdi.x,
-            moralePrim, MORALE_COLOR, 1 ); 
+            endPrim, ENDURANCE_COLOR, 1 ); 
     }
     set_bar_level( srp.z, rdi.y + rdi.z, rec.y,
         focusPrim, FOCUS_COLOR, 0 );
@@ -422,6 +418,7 @@ update_display()
 // Experience keys access
 
 key charID = NULL_KEY;                  // Character sheet not yet requested
+key constID = NULL_KEY;                 // Get constants from the experience
 string DATA_DELIM = "§";
 
 key put_data(string id, string value, string original)
@@ -458,10 +455,10 @@ default // Setup
     {
         llSetText( "", ZERO_VECTOR, 0.0 );
         list prims = get_link_numbers_for_names(
-            [ "menu", "states", "morale", "focus" ] );
+            [ "menu", "states", "endurance", "focus" ] );
         menuPrim = llList2Integer( prims, 0 );
         statesPrim = llList2Integer( prims, 1 );
-        moralePrim = llList2Integer( prims, 2 );
+        endPrim = llList2Integer( prims, 2 );
         focusPrim = llList2Integer( prims, 3 );
         llSetLinkPrimitiveParams( statesPrim, 
             [ PRIM_TEXT, "", <1.0, 0.625, 0.625>, 1.0 ] );
@@ -487,7 +484,7 @@ default // Setup
                     }
                 } else {
                     charKey = (string)llGetOwner() + "-Act!";
-                    llOwnerSay( "Retrieving character sheet " + charKey );
+                    llOwnerSay( "Retrieving character sheet." );
                     charID = llReadKeyValue( charKey );
                 }
             } else {
@@ -517,14 +514,14 @@ default // Setup
     
     dataserver( key id, string body )
     {
-        if ( !( id == charID ) ) return;
+        if ( !( id == charID || id == constID ) ) return;
         
         body = llStringTrim( body, STRING_TRIM );
         
-        if ( id == charID ) {
+        if (llGetSubString(body,0,0) == "1") {
+            body = llGetSubString( body, 2, -1 );
+            if ( id == charID ) {
             // Read from the data server
-            if (llGetSubString(body,0,0) == "1") {
-                body = llGetSubString( body, 2, -1 );
                 list data = llParseString2List( body, [ DATA_DELIM ], [] );
                 
                 integer i = llListFindList( data, ["background"] );
@@ -575,15 +572,20 @@ default // Setup
                 } else {
                     skills = [];
                 }
+                constID = llReadKeyValue( "character-constants" );
+            } else if ( id == constID ) {
+                list values = llCSV2List( body );
+                trait_cost = llList2Float( values, 0 );
+                skill_cost = llList2Float( values, 1 );
                 store_all_values();
                 state active;
-            } else {
-                // Failed to read
-                list error_num = llCSV2List( body );
-                integer error = llList2Integer( error_num, 1 );
-                llOwnerSay("Error retrieving character sheet; Act! is disabled.\nError: " + llGetExperienceErrorMessage( error ) );
             }
-        }        
+        } else {
+            // Failed to read
+            list error_num = llCSV2List( body );
+            integer error = llList2Integer( error_num, 1 );
+            llOwnerSay("Error retrieving character sheet; Act! is disabled.\nError: " + llGetExperienceErrorMessage( error ) );
+        }
     }
     
     link_message( integer sender, integer signal, string msg, key id )
