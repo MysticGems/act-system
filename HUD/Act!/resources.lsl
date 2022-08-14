@@ -3,6 +3,9 @@
 // By Jack Abraham                                                        \__ 
 // ===========================================================================
 
+float TURN_LENGTH = 5.0;            // Real-time turn length
+integer turn = 0;                   // Turn-based turn number
+
 integer useActDamage = TRUE;
 integer sameGroupOnly = FALSE;      // Only play with my group
 integer peacePrim;                  // Display for useActDamage
@@ -21,8 +24,7 @@ integer RDI = 1;
 integer SMF = 2;
 //  Face 3: Defense Bonus, Damage Resistance, Combat status conditions
 integer DEFENSES = 3;
-//  Face 4: Displayed face toward user; do not use for storage
-integer DISPLAY_FACE = 4;
+//  Face 4: Displayed face toward user; do not use
 //  Face 5: Focus recovery rate, Max Focus, Morale recovery rate
 integer RECOVERY = 5;
 // Face 6: Damage modifier, DB modifier, conditions mask
@@ -34,14 +36,13 @@ integer RESTRAINED_MASK = 0x4;      // ?
 integer DEFEATED_MASK = 0x8;        // ?
 integer WOUNDED_MASK = 0x10;        // ?
 integer VULNERABLE_MASK = 0x80;     //
-integer TURN_MASK = 0x100;          // Using turn-based time
-integer SEX_MASK = 0x200;           // Using Sex Act!
 
 // Bitmasks for combat status (defenses.z)
 integer COMBAT_MASK = 0x01;         //
 integer INVULNERABLE_MASK = 0x02;   //
 integer DEFENDING_MASK = 0x04;      //
 integer PEACE_MASK = 0x08;          //
+integer TURN_MASK = 0x10;           // Using turn-based time
 
 integer inCombat;                   // Used to reset combat time trackers
 
@@ -65,10 +66,6 @@ integer menuPrim;
 integer commPrim;
 integer combatPrim;
 integer teamPrim;
-integer actMenuPrim;
-
-key ACT_ICON = "70d6027a-f4e2-4cbe-70f3-85d218083b13";
-key SEX_ACT_ICON = "d2dca9fb-85e9-7fe1-cee3-2153271ef85a";
 
 handle_command( integer sender, integer signal, string msg, key id )
 {
@@ -85,7 +82,6 @@ handle_command( integer sender, integer signal, string msg, key id )
             list parsed = llParseString2List( msg, 
                 [ ACT_DELIM, LINK_DELIM ], [] );
             cmd = llList2String( parsed, 1 );
-            // llOwnerSay( "Act! command: " + llList2CSV( parsed ) );
             
             // Take damage & reduce focus
             if ( cmd == "a!dmg" ) {
@@ -262,18 +258,9 @@ handle_command( integer sender, integer signal, string msg, key id )
                     llOwnerSay( "Interacting with everyone." );
                 }
             } else if ( cmd == "amenu" ) {
-                vector defenses = retrieve( DEFENSES );
-                string my_menuItems = menuItems;
-                string my_menuCommands = menuCommands;
-                if ( (integer)defenses.z & SEX_MASK ) {
-                    my_menuItems += ", Sex Act! Off";
-                } else {
-                    my_menuItems += ", Sex Act! On";
-                }
-                my_menuCommands += ", act!§actmode";
                 llMessageLinked( menuPrim, RP_MASK, 
                     llDumpList2String( [ "menu", "Act! Menu",
-                        my_menuItems, my_menuCommands ], LINK_DELIM ),
+                        menuItems, menuCommands ], LINK_DELIM ),
                     id );
             } else if ( cmd == "point" ) {
                 key target = get_target();
@@ -284,12 +271,33 @@ handle_command( integer sender, integer signal, string msg, key id )
                             LINK_DELIM ),
                         llGetOwner() );
                 }
-            } else if ( cmd == "actmode") {
-                toggle_act_mode();
             }
         } else if ( cmd == "rset" ) {
             llSleep( 5.0 );
             llResetScript();
+        } else if ( cmd == "time" ) {
+            list parsed = llParseString2List( msg, 
+                [ ACT_DELIM, LINK_DELIM ], [] );
+            cmd = llList2String( parsed, 1 );
+            if ( cmd == "set" ) {
+                integer new_turn = (integer)llList2String( parsed, 2 );
+                if ( new_turn ) {
+                    if ( !get_flag( TURN_MASK ) ) {
+                        llSetTimerEvent( 0.0 );
+                        set_flag( TURN_MASK );
+                    }
+                    if ( new_turn > turn ) {
+                        turn = new_turn;
+                        resting_recovery();
+                    }
+                } else {
+                    if ( get_flag( TURN_MASK) ) {
+                        llSetTimerEvent( TURN_LENGTH );
+                        clear_flag( TURN_MASK );
+                        turn = 0;
+                    }
+                }
+            }
         } else if ( cmd == "diag" ) {
             llWhisper( 0, "/me ACT! RESOURCE TRACKER\n" +
                 (string)llGetFreeMemory() + " bytes free" +
@@ -433,10 +441,10 @@ take_damage( list damage, key id )       // Process taking damage
         dmg -= ( defense.y / ( (float)llList2String( damage, 1 ) + 1.0 ) );
     }
     // Apply defense bonus
-    //llOwnerSay( "DB = " + (string)defense.x + "; Defense = " + (string)llPow( 2.0, ( defense.x ) / DB_DENOMINATOR ) );
+    // llOwnerSay( "DB = " + (string)defense.x + "; Defense = " + (string)llPow( 2.0, ( defense.x ) / DB_DENOMINATOR ) );
     dmg /=  llPow( 2.0, ( defense.x ) / DB_DENOMINATOR );
     
-    //llOwnerSay( "Final dmg = " + (string)dmg );    
+    // llOwnerSay( "Final dmg = " + (string)dmg );    
                 
     // Finally, actually take damage
     if ( dmg >= 0 ) {
@@ -447,6 +455,31 @@ take_damage( list damage, key id )       // Process taking damage
                 if ( statusMsg ) {
                     llOwnerSay( "Focus −" + (string)llRound(dmg) );
                 }
+            } else if ( type == "fred" ) {//"sex" ) {
+                vector needs = retrieve( NEEDS );
+                needs.y += dmg;
+                if ( statusMsg ) {
+                    llOwnerSay( "Arousal +" + (string)llRound(dmg) );
+                }
+                if ( needs.y >= attributes.x + attributes.z ) {
+                    string owner = (string)llGetOwner();
+                    llSay( 0, "◤◢◤◢ secondlife:///app/agent/" 
+                        + (string)llGetOwnerKey(id) 
+                        + "/displayname brought secondlife:///app/agent/"
+                        + owner
+                        + "/displayname to orgasm ◤◢◤◢" );
+                    llPlaySound( "a423c8f0-a2da-763d-b651-14ab5b725ccd", 1.0 );
+                    llMessageLinked( LINK_THIS, RP_MASK, 
+                        llDumpList2String( [ "act!", "a!sex", "came" ],
+                            LINK_DELIM ),
+                        id );
+                    needs.y -= attributes.z;
+                    resources.z -= dmg;
+                    statusFlags = statusFlags | VULNERABLE_MASK;
+                } else {
+                    resources.z -= dmg / 3.0;
+                }
+                store( needs, NEEDS );
             } else {
                 resources.y -= dmg;
                 if ( statusMsg ) {
@@ -569,7 +602,6 @@ use_focus( list drain )                     // Expend power for abilities
     }
 }
 
-/* 
 set_flag( integer mask )                    // Set a status flag
 {
     vector flags = retrieve( DEFENSES );
@@ -578,7 +610,6 @@ set_flag( integer mask )                    // Set a status flag
         store( flags, DEFENSES );
     }
 } 
-*/
 
 integer get_flag( integer mask )
 {
@@ -739,19 +770,6 @@ resting_recovery()                          // Periodic recovery & housekeeping
     llSetTimerEvent( scale );
 }
 
-toggle_act_mode() {
-    vector defenses = retrieve( DEFENSES );
-    defenses.z = (integer)defenses.z ^ SEX_MASK;
-    store( defenses, DEFENSES );
-    key texture = ACT_ICON;
-    if ( (integer)defenses.z & SEX_MASK ) {
-        texture = SEX_ACT_ICON;
-    }
-    llSetLinkPrimitiveParamsFast( actMenuPrim,
-        [ PRIM_TEXTURE, DISPLAY_FACE, texture, <1, 1, 1>, 
-            ZERO_VECTOR, 0.0 ]
-        );
-}
 // ===========================================================================
 // Basic Act! functions
 
@@ -858,7 +876,7 @@ string myHeader;                        // Header for messages sent to me
 string ownerHit;                        // Listen prefix for damage
 string NO_DAMAGE = "";                  // No damage pending
 
-string menuItems = "Reload, Statistics, Say Status";
+string menuItems = "Pick Char, Statistics, Morale & Focus Messages";
 string menuCommands = "act!§char, act!§stat, act!§smesg";
 
 integer key2channel( key who ) {
@@ -868,6 +886,31 @@ integer key2channel( key who ) {
 integer power_channel( key who ) {
     return -1 *
         (integer)( "0x" + llGetSubString( (string)who, -10, -3 ) );
+}
+
+// ===========================================================================
+// Updater
+
+integer installHandle;
+integer installChannel;
+
+integer pin = 0;                        // Remote script access PIN
+
+string PASSWORD = "yudruruse8uXucaswu5raBrun6h59e2ucufrajuf";
+
+integer authenticate( string msg, key id )
+{
+    string signature = llGetSubString( msg, -40, -1 );
+    string timestamp = llGetSubString( msg, -44, -41 );
+    msg = llGetSubString( msg, 0, -45 );
+    string hash = llSHA1String( (string)llGetOwner() + PASSWORD + msg +
+        timestamp );
+    return hash == signature;    
+}
+
+string encrypt ( string data ) {
+    return llXorBase64( llStringToBase64( data ),
+        llStringToBase64( PASSWORD ) );
 }
 
 // ===========================================================================
@@ -882,14 +925,12 @@ default
         
         list prims = get_link_numbers_for_names( 
             ["combat", "target", 
-            "teamList", "menu", "act!^peace",
-            "act!:amenu" ] );
+            "teamList", "menu", "act!^peace" ] );
         combatPrim = llList2Integer( prims, 0 );
         targetPrim = llList2Integer( prims, 1 );
         teamPrim = llList2Integer( prims, 2 );
         menuPrim = llList2Integer( prims, 3 );
         peacePrim = llList2Integer( prims, 4 );
-        actMenuPrim = llList2Integer( prims, 5 );
         
         set_prim_lit( peacePrim, !useActDamage );
         set_target( NULL_KEY );
@@ -903,11 +944,10 @@ default
         {
             llRequestPermissions( llGetOwner(), PERMISSION_TAKE_CONTROLS );
             myListen = llListen( myChannel, "", NULL_KEY, "" );
-            llSetTimerEvent( 5.0 );
+            llSetTimerEvent( TURN_LENGTH );
         }
         /* llSay( DEBUG_CHANNEL, llGetScriptName() + " started " +
             (string)llGetFreeMemory() + " bytes free." ); */
-        toggle_act_mode();
     }
     
     attach( key id )
@@ -916,7 +956,7 @@ default
         {
             llRequestPermissions( id, PERMISSION_TAKE_CONTROLS );
             set_target( NULL_KEY );
-            llSetTimerEvent( 5.0 );
+            llSetTimerEvent( TURN_LENGTH );
         }
     }
     
@@ -948,9 +988,7 @@ default
                 inCombat = FALSE;
             }
             pong();
-        } else if ( change & CHANGED_OWNER || 
-            change & CHANGED_INVENTORY || 
-            change & CHANGED_ALLOWED_DROP ) 
+        } else if ( change & CHANGED_OWNER ) 
         {
             llResetScript();
         }    
@@ -1002,6 +1040,35 @@ default
                         llDumpList2String( 
                             [ llGetOwner(), "a!tgt", get_target() ]
                             , ACT_DELIM ) );
+                } else if ( cmd == "a?grp" ) {
+                    // Who's in my group?
+                    string team = llList2String( 
+                        llGetLinkPrimitiveParams( teamPrim, [ PRIM_TEXT ] ),
+                        0 );
+                    llRegionSay( myChannel, 
+                        llDumpList2String( 
+                            [ llGetOwner(), "a!grp" ] + team
+                            , ACT_DELIM ) );
+                } else if ( cmd == "a?upd" ) {
+                    // Updates
+                    if ( ( llGetOwnerKey(id) == llGetOwner() ) &&
+                      authenticate( heard, id ) ) {
+                        llMessageLinked( LINK_ROOT, COMM_MASK,
+                            llDumpList2String( [ "status", "Updating Act!" ],
+                            LINK_DELIM ), id );
+                        pin = llGetUnixTime() ^ 
+                            (integer)llFrand( 16000000.0 );
+                            llSetRemoteScriptAccessPin( pin );
+                        llSetRemoteScriptAccessPin( pin );
+                        llRegionSayTo( id, myChannel, llDumpList2String(
+                            [ "a!upd", "pin", encrypt( (string)pin ) ], ACT_DELIM )
+                            );
+                        llSleep( 10.0 );
+                        llMessageLinked( LINK_ROOT, COMM_MASK,
+                            llDumpList2String( [ "unstatus", "Updating Act!" ],
+                            LINK_DELIM ), id );
+                        llResetScript();
+                    }
                 } else {
                     // Pass on to other scripts
                     llMessageLinked( LINK_THIS, RP_MASK, 
@@ -1084,3 +1151,4 @@ state defeated
             llGetUsername( llGetOwner() ) + ") rallies." );
     }
 }
+// Copyright ©2022 Jack Abraham 
