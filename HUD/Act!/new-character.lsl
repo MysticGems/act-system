@@ -2,9 +2,9 @@
 // Character Sheet                                                           \
 // By Jack Abraham                                                        \__ 
 // ===========================================================================
-
 // use LSD and either web or experience storage
 
+// Get traits from LSD
 string ACT_PREFIX = "act#";
 
 integer readTrait( string trait ) {
@@ -42,7 +42,6 @@ readKeyValue( string data_key, integer infoType ) {
         );
     }
 }
-
 updateKeyValue( string data_key, string value, integer infoType ) {
     string hash = llSHA1String(
         (string)llGetObjectKey() + data_key + SECURE_HEADER_VALUE
@@ -77,9 +76,33 @@ writeJsonCharacter( string json ) {
         loop += 2;
     }
 }
+// =========================================================================
+// Task roll
+// =========================================================================
+
+string FAIL = "FAIL";
+string SUCCESS = "SUCCESS";
+
+// Action format:
+//       Key of object to reply to (owner for internal calls)
+//       |            Signal to send with success/failure
+//       |            |   Attribute rolled against
+//       |            |   |         Skill to modify attribute*
+//       |            |   |         |     Trait required to attempt*
+//       |            |   |         |     |    Modifier to probability*
+//       |            |   |         |     |     |
+// a!act:reply-to-key:000:attribute:skill:trait:0.00
+//
+// * Optional field, but delimiters for prior fields required
 
 // ===========================================================================
 default {
+    state_entry()
+    {
+    }
+
+    
+    
     // Response from Experience
     dataserver( key id, string body )
     {
