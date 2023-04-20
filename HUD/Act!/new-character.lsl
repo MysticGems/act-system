@@ -76,6 +76,22 @@ writeJsonCharacter( string json ) {
         loop += 2;
     }
 }
+
+integer character_exists() {
+    list keys = llLinksetDataListKeys(0, -1);
+    integer length = llGetListLength(keys);
+    integer loop = 0;
+    integer prefix_length = llStringLength(ACT_PREFIX) - 1;
+    while ( loop < length ) {
+        if ( llGetSubString(
+            llList2String(keys, loop), 
+            0, prefix_length) == ACT_PREFIX ) {
+            return TRUE;
+        }
+        loop++
+    }
+    return FALSE;
+}
 // =========================================================================
 // Task roll
 // =========================================================================
@@ -99,9 +115,18 @@ string SUCCESS = "SUCCESS";
 default {
     state_entry()
     {
+        if (!character_exists()) {
+            llOwnerSay("Reading character");
+            readKeyValue((string)llGetOwner() + "#" + character);
+        }
     }
 
-    
+    attach(key id)
+    {
+        if (id) {
+            llResetScript();
+        }
+    }
     
     // Response from Experience
     dataserver( key id, string body )
