@@ -15,9 +15,9 @@ integer readTrait( string trait ) {
     return FALSE;
 }
 updateTrait( string trait, string value ) {
-    string val = llLinksetDataWrite( ACT_PREFIX + trait, value );
+    integer val = llLinksetDataWrite( ACT_PREFIX + trait, value );
     if ( val && val != LINKSETDATA_NOUPDATE ) {
-        llOwnerSay( "Error " + (string)val + " updating " + trait )
+        llOwnerSay( "Error " + (string)val + " updating " + trait );
     }
 }
 
@@ -44,7 +44,7 @@ readKeyValue( string data_key, integer infoType ) {
 }
 updateKeyValue( string data_key, string value, integer infoType ) {
     string hash = llSHA1String(
-        (string)llGetObjectKey() + data_key + SECURE_HEADER_VALUE
+        (string)llGetKey() + data_key + SECURE_HEADER_VALUE
         );
     requestId = llHTTPRequest(
         SLDB_URL + data_key,
@@ -88,7 +88,7 @@ integer character_exists() {
             0, prefix_length) == ACT_PREFIX ) {
             return TRUE;
         }
-        loop++
+        loop++;
     }
     return FALSE;
 }
@@ -117,7 +117,8 @@ default {
     {
         if (!character_exists()) {
             llOwnerSay("Reading character");
-            readKeyValue((string)llGetOwner() + "#" + character);
+            readKeyValue((string)llGetOwner() + "#character", 
+                REQUEST_TYPE_CHARACTER_SHEET);
         }
     }
 
