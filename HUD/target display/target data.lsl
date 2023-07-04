@@ -517,7 +517,7 @@ state tracking
             }
             if ( info & AGENT_AUTOMATED ) {
                 name += "⬣";
-            }
+            };
             if ( info & AGENT_MOUSELOOK ) {
                 name += "⚔";
             }
