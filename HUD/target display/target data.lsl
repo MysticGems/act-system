@@ -29,6 +29,10 @@ string rlv;
 string status = "";
 
 integer targetDisplay;
+integer targetProbe;
+integer compassPrim;
+integer moralePrim;
+integer focusPrim;
 
 rotation compassRot;
 
@@ -36,13 +40,10 @@ integer RLV_CHANNEL = -1812221819;      // Channel for RLV ping
 integer RLV_RESPONSE = 182040672;
 integer rlvHandle;                      // RLV listener handle
 
-//string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
-//string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
-string SOLID = "||||||||||||||||||||";
-string HOLLOW = "...................";
-string SPACER = "";
-// string SPACER =  "                            ";
-integer MAX_TICKS = 10;
+string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
+string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
+string SPACER =  "                            ";
+integer MAX_TICKS = 15;
 vector MORALE_COLOR = <0.3333, 1.0, 0.3333>;
 vector FOCUS_COLOR = <0.0, 0.6667, 1.0>;
 
@@ -85,6 +86,25 @@ check_bearing( key target ) {
     }
 }
 
+check_facing(){
+    rotation rot = llGetCameraRot();
+    vector fwd = llRot2Fwd( rot );
+    float bearing = llAtan2( fwd.y, fwd.x );
+    if ( llFabs( fwd.z > 0.999 ) ) {
+        vector left = llRot2Left( rot );
+        bearing = llAtan2( -left.x, left.y );
+    }
+    if ( bearing < 0. ) bearing += TWO_PI;
+    if ( bearing != last_facing ) {
+        change_facing = TRUE;
+        last_facing = bearing;
+        last_facing_change = llGetTime();
+        llSetTimerEvent( VERY_SHORT_TIME );
+    } else if ( llGetAgentInfo( owner ) & AGENT_MOUSELOOK ) {
+        llSetTimerEvent( VERY_SHORT_TIME );
+    }
+}
+
 string compass (vector target, vector loc) 
 {
     float distance = llVecDist(loc, target);
@@ -114,27 +134,6 @@ string compass (vector target, vector loc)
     else
         return "N";
 }
-
-string set_bar( float current, float attrib ) {
-    string bar;
-    float ratio;
-    float maximum;
-    
-    if ( current < 0 ) current = 0.0;
-    if ( attrib > 0 ) {
-        ratio = current / attrib;
-    }
-    if ( ratio > 1.0 ) ratio = 1.0;
-    integer level = (integer)( ratio * (float)MAX_TICKS );
-    if ( level ) {
-        bar = llGetSubString( SOLID, 0, level - 1 );
-    }
-    if ( level < MAX_TICKS ) {
-        bar += llGetSubString( HOLLOW, 0, MAX_TICKS - level - 1 );
-    }
-    return bar;
-}
-
 set_bar_level( float current, float attrib, integer prim, vector color, 
     integer line )
 {
@@ -199,12 +198,21 @@ default
 {
     state_entry()
     {
+        hudRot = llEuler2Rot( <PI_BY_TWO, 0., 0. > );
+        llSetRot( hudRot );
+        compassRot = llEuler2Rot( <0., 0, -PI_BY_TWO> );
         owner = llGetOwner();
         target = NULL_KEY;
         llSetAlpha( 0.0, ALL_SIDES );
         llSetTimerEvent( 0. );
-        list prims = get_link_numbers( ["target display" ] );
+        list prims = get_link_numbers( ["target display",     
+                "sens^probe", "sensors", "compass", "target morale",
+                "target focus" ] );
         targetDisplay = llList2Integer( prims, 0 );
+        targetProbe = llList2Integer( prims, 1 );
+        compassPrim = llList2Integer( prims, 3 );
+        moralePrim = llList2Integer( prims, 4 );
+        focusPrim = llList2Integer( prims, 5 );
         
         last_range = 0.;
         
@@ -216,7 +224,14 @@ default
                 PERMISSION_TAKE_CONTROLS | PERMISSION_TRACK_CAMERA );
         }
         set_text( "" );
+        llSetLinkPrimitiveParamsFast( moralePrim, 
+            [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+        llSetLinkPrimitiveParamsFast( focusPrim, 
+            [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
         llSetObjectDesc( (string)NULL_KEY );
+        llSetLinkPrimitiveParamsFast( targetProbe,
+            [ PRIM_COLOR, ALL_SIDES, <0, 0, 0>, 0.0 ] );
+        llSetTimerEvent( SHORT_TIME );
     }
 
     on_rez( integer p )
@@ -237,6 +252,7 @@ default
         list parsed = llParseString2List( m, [ "§" ], [] );
         string cmd = llList2String( parsed, 0 );
         
+        // llOwnerSay( llGetLinkName( source ) );
         
         if ( cmd == "trgt" ) {
             target = (key)llList2String( parsed, 1 );
@@ -249,21 +265,38 @@ default
         }
     }
     
+    timer()
+    {
+        float now = llGetTime();
+        if ( now - last_facing_change > LONG_TIME  ) {
+            if ( ! ( llGetAgentInfo( owner ) & AGENT_MOUSELOOK ) ) {
+                llSetTimerEvent( VERY_SHORT_TIME );
+            }
+        }
+        check_facing();
+        if ( change_facing ) {
+            // llRotateTexture( last_bearing + PI, ALL_SIDES );
+            llSetLinkPrimitiveParamsFast( compassPrim, [ PRIM_ROT_LOCAL,
+                llEuler2Rot( <0., 0., -last_facing> ) * compassRot ] );
+            change_facing = FALSE;
+        }
+    }
 }
 
 state tracking
 {
     state_entry()
     {
-        // llOwnerSay( "start tracking" );
         if ( target == NULL_KEY ) {
             state default;
         }
-        llPlaySound( "46e2dd13-85b4-8c91-ab62-7d5c4dd16068", 1.0 );
         llSetTimerEvent( SHORT_TIME );
+        llSetAlpha( 0.5, ALL_SIDES );
         check_bearing( target );
         color = llList2Vector( llGetLinkPrimitiveParams( LINK_ROOT,
             [ PRIM_COLOR, LIT_FACE ] ), 0 );
+        llSetLinkPrimitiveParamsFast( targetProbe,
+            [ PRIM_COLOR, ALL_SIDES, <0, 0, 0>, 0.4 ] );
             
         // Get Act! status, if present
         integer channel = key2channel( target );
@@ -297,13 +330,24 @@ state tracking
                 vector srp = (vector)llList2String( parsed, 0 );
                 vector def = (vector)llList2String( parsed, 2 );
                 vector needs = (vector)llList2String( parsed, 5 );
+                if ( !( (integer)def.z & PEACE_MASK ) ) {
+                    set_bar_level( srp.y, rdi.y + rdi.x,
+                        moralePrim, MORALE_COLOR, 1 ); 
+                    set_bar_level( srp.z, rdi.y + rdi.z,
+                        focusPrim, FOCUS_COLOR, 0 ); 
+                } else {
+                    llSetLinkPrimitiveParamsFast( moralePrim, 
+                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+                    llSetLinkPrimitiveParamsFast( focusPrim, 
+                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+                }
                 integer states = (integer)srp.x;
                 list statusItems = [];
                 if ( states & STUNNED_MASK ) {
                     statusItems += "⊘";
                 }
                 if ( states & WOUNDED_MASK ) {
-                    statusItems += "☤";
+                    statusItems += "♥";
                 }
                 if ( states & RESTRAINED_MASK ) {
                     statusItems += "◉";
@@ -318,13 +362,6 @@ state tracking
                     statusItems += "⚤" + 
                         llGetSubString( MINIBAR, arousal, arousal );
                 }
-                if ( statusItems ) {
-                    statusItems = "\n" + statusItems;
-                }
-                statusItems += "♥︎" + 
-                    set_bar( srp.y, rdi.x + rdi.y);
-                statusItems += "⚡" + 
-                    set_bar( srp.z, rdi.y + rdi.z);
                 status = llDumpList2String( statusItems, " " );
             }
         } else if ( llGetSubString( msg, 0, 9 ) == "Restrained" ) {
@@ -371,6 +408,10 @@ state tracking
                 actHandle = llListen( channel, "", NULL_KEY, "" );
                 status = "";
                 if ( channel ) {
+                    llSetLinkPrimitiveParamsFast( moralePrim, 
+                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+                    llSetLinkPrimitiveParamsFast( focusPrim, 
+                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
                     llRegionSay( channel, (string)target + ":a!png" );
                     rlv = "";
                     if ( llGetAgentSize( target ) ) {
@@ -401,6 +442,28 @@ state tracking
                 llSetTimerEvent( VERY_SHORT_TIME );
             }
         }
+        check_bearing( target );
+        check_facing();
+        if ( change_bearing ) {
+            rotation rot = llEuler2Rot( <0., 0., last_bearing + PI> ) * hudRot;
+            float range = last_range;
+            if ( range < 2. ) range = 2.;
+            else if ( range > 20. ) range = 20.;
+            float cut = .025 + ( ( 0.95/6.0 ) / range );
+            llSetLinkPrimitiveParamsFast( LINK_THIS,
+                [ PRIM_TYPE, PRIM_TYPE_CYLINDER,
+                    PRIM_HOLE_DEFAULT,
+                    < 0.75 - cut, 0.75 + cut, 0. >,
+                    0.85, <0., 0., 0.>, <1., 1., 0.>, <0., 0., 0.>,
+                    PRIM_COLOR, ALL_SIDES, color, 1.0,
+                    PRIM_ROTATION, rot ] );
+            change_bearing = FALSE;
+        }
+        if ( change_facing ) {
+            llSetLinkPrimitiveParamsFast( compassPrim, [ PRIM_ROT_LOCAL,
+                llEuler2Rot( <0., 0., -last_facing> ) * compassRot ] );
+            change_facing = FALSE;
+        }
         
         vector agent = llGetAgentSize(target);
         if ( agent ) {
@@ -411,6 +474,10 @@ state tracking
             name = llGetSubString( name, 0, 20 ) + "…";
         }
         
+        if ( status )
+        {
+            name += " " + status;
+        }
         
         vector here = llList2Vector( llGetObjectDetails( llGetOwner(),
             [OBJECT_POS] ), 0 );
@@ -445,17 +512,23 @@ state tracking
                 key my_seat = llList2Key( 
                     llGetObjectDetails( llGetOwner(), [ OBJECT_ROOT ] ), 0 );
                 if ( my_seat == target_seat ) {
-                    name += "⚓";
+                    name += "h";
                 }
+            }
+            if ( info & AGENT_AUTOMATED ) {
+                name += "⬣";
             }
             if ( info & AGENT_MOUSELOOK ) {
                 name += "⚔";
             }
         }
-        if ( status )
-        {
-            name += "\n" + status;
-        }
         set_text( name + rlv);
     }
 }
+
+// This work is licensed under the Creative Commons 
+// Attribution-Noncommercial-Share Alike 3.0 United States License. 
+// To view a copy of this license, visit 
+// http://creativecommons.org/licenses/by-nc-sa/3.0/us/ 
+// or send a letter to Creative Commons, 171 Second Street, Suite 300, San 
+// Francisco, California, 94105, USA.
