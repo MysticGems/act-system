@@ -442,8 +442,7 @@ integer targetPrim = LINK_ROOT;
 
 key get_target()
 {
-    return (key)llList2String(
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] ), 0 );
+    return llLinksetDataRead( "target" );
 }
 
 vector LIT = <0.5, 1.0, 0.5>;
@@ -602,9 +601,11 @@ default
         set_active_construct( construct );
         key target = get_target();
         if ( target ) {
+            llSetObjectDesc( "trgt:" + (string)target );
             llSleep( 0.1 );
             send_construct_msg( [ "trgt", target ] );
         } else {
+            llSetObjectDesc( "" );
             llSensor( "", NULL_KEY, AGENT, 20.0, PI / 3.0 );
         }
     }
