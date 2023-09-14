@@ -112,11 +112,7 @@ integer targetPrim;
 
 set_target( key id )
 {
-    llSetLinkPrimitiveParamsFast( targetPrim,
-        [ PRIM_DESC, (string)id ] );
-    llMessageLinked( LINK_SET, BROADCAST_MASK, 
-        llDumpList2String( [ "trgt", id ], LINK_DELIM ),
-        llGetKey() );
+    llLinksetDataWrite( "target", id );
 }
 
 list get_link_numbers_for_names(list namesToLookFor)
