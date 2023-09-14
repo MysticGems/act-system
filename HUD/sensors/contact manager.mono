@@ -49,11 +49,11 @@ sort()
     integer nearCount = llGetListLength(tracking);
     vector there;
     
-    if ( mode == "bio" ) {
-        if ( llGetAgentInfo( owner ) & AGENT_SITTING ) {
-            displayKeys += [ 0, owner ];
-        }
-    }
+    //if ( mode == "bio" ) {
+    //    if ( llGetAgentInfo( owner ) & AGENT_SITTING ) {
+    //        displayKeys += [ 0, owner ];
+    //    }
+    //}
     
     while( i < nearCount )
     {
@@ -242,9 +242,7 @@ set_lit( integer prim, integer on )
 
 key get_target()
 {
-    return (key)llList2String( 
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
-        , 0 );
+    return llLinksetDataRead( "target" );
 }
 
 list get_link_numbers ( list names )
@@ -284,10 +282,9 @@ init()
             displayPrims += [ i ];
         }
     }
-    list prims = get_link_numbers( [ "scan:filter", "menu", "target" ] );
+    list prims = get_link_numbers( [ "scan:filter", "menu" ] );
     filterPrim = llList2Integer( prims, 0 );
     menuPrim = llList2Integer( prims, 1 );
-    targetPrim = llList2Integer( prims, 2 );
     searchPrim = llList2Integer( prims, 0 );
     set_lit( filterPrim, FALSE );
     set_lit( searchPrim, FALSE );
