@@ -25,6 +25,8 @@ key group;                                      // My group
 
 list report;                                    // What are we sending
 
+list ATTACHMENT_POINTS = [ "", "Chest", "Skull", "Left Shoulder", "Right Shoulder", "Left Hand", "Right Hand", "Left Foot", "Right Foot", "Spine", "Pelvis", "Mouth", "Chin", "Left Ear", "Right Ear", "Left Eye", "Right Eye", "Nose", "Right Upper Arm", "Right Lower Arm", "Left Upper Arm", "Left Lower Arm", "Right Hip", "Right Upper Leg", "Right Lower Leg", "Left Hip", "Left Upper Leg", "Left Lower Leg", "Stomach", "Left Pec", "Right Pec", "HUD Center", "HUD Top Right", "HUD Top", "HUD Top Left", "HUD Center", "HUD Bottom Left", "HUD Bottom", "HUD Bottom Right", "Neck", "Avatar Center", "Left Ring Finger", "Right Ring Finger", "Tail Base", "Tail Tip", "Left Wing", "Right Wing", "Jaw", "Left Ear", "Right Ear", "Left Eye", "Right Eye", "Tongue", "Groin", "Left Hind Foot", "Right Hind Foot" ];
+
 scan_commands( list parsed )
 {
     string cmd = llList2String( parsed, 1 );
@@ -150,14 +152,47 @@ agent_probe( key target )
     //bounds.z += 0.17;
     float mass = llGetObjectMass( target );
     integer height = llFloor( bounds.z * 100.0 / 2.51 );
+    list details = llGetObjectDetails( target, 
+        [ OBJECT_ROOT, OBJECT_RENDER_WEIGHT ] );
+    key root = llList2Key( details, 0 );
+    integer weight = llList2Integer( details, 1 ) /1000;
+    report += [ "    ARC: " + (string)weight + "k" ];
     report += [ "    Height: " + llGetSubString( (string)bounds.z, 0, 3 )
         + "m (" + (string)( height / 12 ) + "'" 
             + (string)( height % 12 ) + "\")"
         + "; Mass: " + llGetSubString( (string)mass, 0, 3 ) ];
+        
+    if ( root != target ) {
+        report += [ "    Sitting on "
+            + llKey2Name( root ) ];
+    }
     
+
     queryID1 = llRequestAgentData( target, DATA_BORN );
     queryID2 = llRequestAgentData( target, DATA_PAYINFO );
     llSetTimerEvent( WAIT );
+}
+
+report_attachments( key target ) {
+    list attachedsorted = llListSort(llGetAttachedList(target),2,1);
+    integer i;
+    report = [];
+    list details;
+    reportLength = llGetListLength(attachedsorted);
+
+    for( i=0; i<llGetListLength(attachedsorted);i++)
+    {
+        details = llGetObjectDetails(
+            llList2Key(attachedsorted,i),
+            [OBJECT_ATTACHED_POINT, OBJECT_CREATOR, OBJECT_SCRIPT_MEMORY] );
+        report += [ "    " + 
+            llKey2Name (llList2Key(attachedsorted,i)) +
+            " attached to " + 
+            llList2String( ATTACHMENT_POINTS, llList2Integer( details, 0 ))  +
+            " (Creator: secondlife:///app/agent/" + llList2String( details, 1 ) +
+            "/inspect; " + (string)(llList2Integer(details, 2)/1024) + "kb)"
+            ]; 
+    }
 }
 
 object_probe( key target )
@@ -305,6 +340,10 @@ dataserver_report( key query, string data )
         }
     }
     make_report();
+    //if ( probeMode == PERSON ) {
+    //    report_attachments( get_target() );
+    //    make_report();
+    //}
 }
 
 string hhmm( integer seconds )
@@ -411,23 +450,16 @@ set_lit( integer prim, integer on )
 
 key get_target()
 {
-    return (key)llList2String( 
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
-        , 0 );
+    return (key)llLinksetDataRead( "target" );
 }
 
 set_target( key id )
 {
-    llSetLinkPrimitiveParamsFast( targetPrim,
-        [ PRIM_DESC, (string)id ] );
-    llMessageLinked( LINK_SET, BROADCAST_MASK, 
-        llDumpList2String( [ "trgt", id ], LINK_MSG_DELIM ),
-        llGetKey() );
+    llLinksetDataWrite( "target", id );
 }
 
 integer comm = LINK_ROOT;               // Where are the prims?
 integer status = LINK_ALL_OTHERS;
-integer targetPrim;
 key owner;
 
 list displayPrims;              // Prim numbers for line displays
@@ -467,13 +499,11 @@ default
 {
     state_entry()
     {
-        list prims = get_link_numbers( [ "target" ] );
-        targetPrim = llList2Integer( prims, 0 );
         status = LINK_ROOT;
         owner = llGetOwner();
         display_prims();
-        //llWhisper( DEBUG_CHANNEL, llGetScriptName() + " initialized; " 
-        //    + (string)llGetFreeMemory() + " bytes free." );
+        llOwnerSay( llGetScriptName() + " initialized; " 
+            + (string)llGetFreeMemory() + " bytes free." );
     }
 
     link_message( integer source, integer flag, string message, key id )
