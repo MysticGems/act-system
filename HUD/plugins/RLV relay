@@ -21,7 +21,7 @@ string helpURL =                // URL for documentation
 
 list restrictions;              // strided list of object keys &
                                 // restrictions without the "=n" part
-key master = NULL_KEY;          // Master; automatically trusted
+string master = "RLVmaster";    // LSD key for master UUID
 list trusted =                  // list of trusted object owners
     [ NULL_KEY, NULL_KEY, NULL_KEY, NULL_KEY, NULL_KEY, NULL_KEY, 
     NULL_KEY, NULL_KEY, NULL_KEY, NULL_KEY ];
@@ -50,13 +50,15 @@ integer is_trusted( string name, key id, string msg )
     list commands = llParseString2List( llList2String( tokens, 2 ),
         [ "|" ], [] );
     if ( simple_request( commands ) || ~llListFindList( trusted, [who] ) 
-        || who == master )
+        || who == llLinksetDataRead( master ) )
     {
         // Command is simple or sender is trusted
         return TRUE;
     }
-    ask_trust( name, who );
-    pending_command = [ name, id, msg ];
+    if ( allowOtherRestrict ) {
+        ask_trust( name, who );
+        pending_command = [ name, id, msg ];
+    }
     return FALSE;
 }
 
@@ -271,7 +273,7 @@ add_trust( key id )
             trusted = llDeleteSubList(trusted, 2, 2);
         }
         llOwnerSay( "/me RLV Relay: " + key2name(id)
-            + " added to white list." );
+            + " is trusted." );
     }
 }
 
@@ -286,7 +288,7 @@ add_untrust( key id )
             untrusted = llDeleteSubList(untrusted, 1, 1);
         }
         llOwnerSay( "/me RLV Relay: " + key2name(id)
-            + " added to black list." );
+            + " is not trusted." );
     }
 }
 
@@ -340,10 +342,13 @@ relay_message( string name, key id, string msg )
 
 dialog_responses( string msg ) {
     if ( msg == "Trust" ) {
-        add_trust( llGetOwnerKey( llList2Key( pending_command, 1 ) ) );
+        key trustKey = llGetOwnerKey( llList2Key( pending_command, 1 ) );
+        add_trust( trustKey );
         relay_message( llList2String( pending_command, 0 ),
             llList2Key( pending_command, 1 ),
             llList2String( pending_command, 2 ) );
+        llOwnerSay( "Now trusting secondlife:///app/agent/" + 
+            (string)trustKey + "/info");
     } else if ( msg == "No Trust" ) {
         add_untrust( llGetOwnerKey( llList2Key( pending_command, 1 ) ) );
     } else if ( msg == "Off" ) {
@@ -352,7 +357,7 @@ dialog_responses( string msg ) {
         active = FALSE;
         llOwnerSay( "/me RLV Relay: Deactivated." );
     } else if ( msg == "No Trusted" ) {
-        trusted = [ owner, master ];
+        trusted = [ owner, llLinksetDataRead( master ) ];
         llOwnerSay( "/me RLV relay: Whitelist cleared." );
     } else if ( msg == "No Untrusted" ) {
         untrusted = [];
@@ -394,6 +399,7 @@ agent_responses( string msg )
 {
     if ( !active )
     {
+        llOwnerSay( "/me RLV Relay: " + msg );
         if ( llSubStringIndex( msg, "RestrainedLife viewer" ) == 0 ) {
             initialize();
         }
@@ -424,10 +430,10 @@ string key2name( key id )
 {
     string name = llKey2Name( id );
     if ( name == "" ) {
-        if ( id == master ) {
+        if ( id == llLinksetDataRead( master ) ) {
             return "secondlife:///app/agent/" + (string)id + "/username";
         } else if ( llGetLandOwnerAt( llGetPos() ) == id ) {
-            return "the land owner here";
+            return "the land owner here.";
         } else {
             return "an unknown user or group";
         }
@@ -475,8 +481,11 @@ initialize()
 {
     active = TRUE;
     llOwnerSay( RLV_COMMAND_START );
+    if ( llLinksetDataRead( master ) == "" ) {
+        llLinksetDataWrite( master, llGetCreator() );
+    }
     add_trust( llGetOwner() );
-    add_trust( master );
+    add_trust( llLinksetDataRead( master ) );
     RLVRShandle = llListen( RLVRS_CHANNEL, "", NULL_KEY, "" );
     if ( FLAG_FACE > 0 ) {
         vector color = llList2Vector( llGetLinkPrimitiveParams( LINK_ROOT,
@@ -523,8 +532,8 @@ default
         owner= llGetOwner();
         INTERNAL_COMMAND_PREFIX += (string)owner + ",";
         test_for_viewer();
-        // llOwnerSay( llGetScriptName() + " initialized; " +
-        //   (string)llGetFreeMemory() + " bytes free." );
+         llOwnerSay( llGetScriptName() + " initialized; " +
+           (string)llGetFreeMemory() + " bytes free." );
     }
 
     on_rez( integer start )
@@ -578,12 +587,13 @@ default
                 list parsed = llParseString2List( str, [ "§" ], [] );
                 string cmd = llList2String( parsed, 1 );
                 if ( cmd == "master" ) {
-                    master = (key)llList2String( parsed, 2 );
-                    if ( master == llGetOwner() ) {
+                    key new_master = (key)llList2String( parsed, 2 );
+                    if ( new_master == llGetOwner() ) {
                         master = NULL_KEY;
                     } else {
                         llOwnerSay( "Trusting secondlife:///app/agent/" 
-                            + (string)master + "/inspect" );
+                            + (string)new_master + "/inspect" );
+                        llLinksetDataWrite( master, new_master );
                     }
                 } else if ( external ) {
                     llWhisper( RLVRS_CHANNEL, 
@@ -625,5 +635,14 @@ default
             llTakeControls( 1024, FALSE, TRUE );
         }
     }
+    
+    sensor( integer d ) {
+        follow();
+    }
+    
+    no_sensor() {
+        llStopMoveToTarget();
+        llSensorRemove();
+        followMe = NULL_KEY;
+    }
 }
-
