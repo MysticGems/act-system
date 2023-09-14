@@ -44,6 +44,25 @@ plugin_menu( string title, string commandPrefix, list menuItems,
         llGetOwner() );
 }
 
+script_report()
+{
+    list details = llGetObjectDetails( llGetLinkKey( LINK_ROOT ), 
+            [ OBJECT_SCRIPT_MEMORY, OBJECT_SCRIPT_TIME ] );
+    integer hudMemory = llList2Integer( details, 0 );
+    string scriptTime = llGetSubString(
+        (string)( llList2Float( details, 1 ) * 1000 ),
+        0, 6 );
+    details = llGetObjectDetails( llGetLinkKey( LINK_THIS ), 
+            [ OBJECT_SCRIPT_MEMORY, OBJECT_SCRIPT_TIME ] );
+    llWhisper( 0, "PLUGIN MANAGER\n" + (string)llGetUsedMemory() 
+        + " bytes used\nHUD SUMMARY ____________________________"
+        + "\n" + (string)(llList2Integer( details, 0 )/1024) + " kb in "
+        + (string)( llGetInventoryNumber( INVENTORY_SCRIPT ) - 1 ) 
+        + " plugins\n"
+        +"HUD memory: " + (string)( hudMemory / 1024 ) + " kb"
+        + "\nScript time: " + scriptTime + " ms");
+}
+
 integer key2channel( key id )
 {
     return -1 * (integer)( "0x" + llGetSubString( (string)id, -10, -3 ) );
@@ -166,11 +185,7 @@ default
                         llDumpList2String( [ "unstatus", "Removing plugin" ],
                         LINK_DELIM ), id );
                 } else if ( cmd == "status" ) {
-                    integer hudMemory = llList2Integer( 
-                        llGetObjectDetails( llGetLinkKey( LINK_ROOT ), 
-                            [ OBJECT_SCRIPT_MEMORY ] )
-                        , 0 );
-                    llOwnerSay( "HUD memory: " + (string)hudMemory );
+                    script_report();
                 }
             } else if ( cmd == "diag" ) {
                 state diag;
@@ -222,15 +237,6 @@ state diag
 {
     state_entry()
     {
-        integer plugMemory= llList2Integer( 
-            llGetObjectDetails( llGetLinkKey( LINK_ROOT), 
-                [ OBJECT_SCRIPT_MEMORY ] )
-            , 0 );
-        llWhisper( 0, "PLUGIN MANAGER\n" + (string)llGetUsedMemory() 
-            + " bytes used\n"
-            + (string)( llGetInventoryNumber( INVENTORY_SCRIPT ) - 1 ) 
-            + " plugins\n"
-            + (string)( plugMemory / 1024 )+ "kb memory in HUD" );
         freeMemory = llGetFreeMemory();
         llSetTimerEvent( 1.0 );
         llMessageLinked( LINK_SET, BROADCAST_MASK, "fmem", llGetKey() );
@@ -249,7 +255,7 @@ state diag
             llGetObjectDetails( llGetLinkKey( LINK_ROOT), 
                 [ OBJECT_SCRIPT_MEMORY ] )
             , 0 );
-
+        script_report();
         llWhisper( 0, "MEMORY USAGE\nUsing " + (string)(memory - freeMemory)
             + " of " + (string)memory + " allocated." );
         state default;
@@ -261,3 +267,5 @@ state diag
     }
 }
 
+// Copyright ©2023 Jack Abraham and player, all rights reserved
+// Contact Guardian Karu in Second Life for distribution rights
