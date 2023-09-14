@@ -23,7 +23,7 @@ key testAgentURLHTTP;               // agent URL being tested
 
 key activeAgent;                    // Agent we're commanding
 
-key postAgentCommandHTTP;           // Post command 
+key postAgentCommandHTTP;           // Post command
 
 integer BROADCAST_MASK      = 0xFFF00000;
 integer COMMUNICATION_MASK  = 0x10000000;
@@ -49,9 +49,9 @@ handle_command( list commands )
     } else if ( cmd == "select" ) {
         activeAgent = NULL_KEY;
         select_agent_menu();
-        return; 
+        return;
     } else if ( cmd == "summon" ) {
-        list details =  llGetObjectDetails( llGetOwner(), [ OBJECT_POS, 
+        list details =  llGetObjectDetails( llGetOwner(), [ OBJECT_POS,
             OBJECT_ROT ] );
         vector here = llList2Vector( details, 0 ) + ( <2, 0, 0> *
             llList2Rot( details, 1 ) ) + llGetRegionCorner();
@@ -87,15 +87,15 @@ menu()
     menuCommands = [];
     string prefix = llGetScriptName() + LINK_MSG_DELIM;
     if ( activeAgent ) {
-        menuItems = [ "SELECT", "Attack", "Peace", 
+        menuItems = [ "SELECT", "Attack", "Peace",
             "Summon", "Target", "Chase Target", "Follow Me",
             "No Target/Stop Follow", "Attack", "Peace" ];
-        menuCommands = [ 
+        menuCommands = [
             prefix + "atk", prefix + "peace",
             prefix + "select", prefix + "summon", prefix + "trgt",
             prefix + "chase", prefix + "leash", prefix + "ntgt"
             ];
-        send_menu( llList2String( agentNames, 
+        send_menu( llList2String( agentNames,
             llListFindList( agents, [activeAgent] )));
     } else {
         select_agent_menu();
@@ -143,7 +143,7 @@ key get_data(key id, list fields, integer verbose, integer reverse)
 {
     llSleep( 1.0 );
     string args;
-    args += "?key=" + llEscapeURL(id) + "&separator=" 
+    args += "?key=" + llEscapeURL(id) + "&separator="
         + llEscapeURL(HTTP_DELIM);
     args += "&fields=" + llEscapeURL( llDumpList2String( fields, HTTP_DELIM ) )
         + "&verbose=" + (string)verbose + "&reverse=" + (string)reverse;
@@ -157,7 +157,7 @@ string TEAM_URL = "http://mysticgems.geographic.net/act/auth.php";
 key get_team_auth( key id )
 {
     string args;
-    args += "?key=" + llEscapeURL(id) + "&separator=" 
+    args += "?key=" + llEscapeURL(id) + "&separator="
         + llEscapeURL(HTTP_DELIM);
     args += "&fields=team";
     args += "&secret=" + llEscapeURL( llSHA1String( PASSWORD + (string)id ) );
@@ -170,7 +170,7 @@ key put_data(key id, string where, string data, integer verbose)
 {
     llSleep( 1.0 );
     string args;
-    args += "?key=" + llEscapeURL(id) + "&separator=" 
+    args += "?key=" + llEscapeURL(id) + "&separator="
         + llEscapeURL(HTTP_DELIM);
     args += "&fields=" + llEscapeURL(where);
     args += "&values=" + llEscapeURL(data);
@@ -189,7 +189,7 @@ key send_command( list command )
         integer c = llGetListLength( command );
         //while ( c > 0 ) {
         //    c--;
-        //    command = llListReplaceList( command, [ llEscapeURL( 
+        //    command = llListReplaceList( command, [ llEscapeURL(
         //        llList2String( command, c ) ) ], c, c );
         //}
         c = RETRIES;
@@ -212,9 +212,9 @@ key send_command( list command )
 set_active_agent( key id )
 {
     activeAgent = id;
-    testAgentURLHTTP = send_command( [ "IM", 
-        llGetDisplayName( llGetOwner() ) + 
-        " has taken control of your ring." ] );
+    testAgentURLHTTP = send_command( [ "IM",
+        llGetDisplayName( llGetOwner() ) +
+        " has power over you." ] );
 }
 
 string agent_name( key id )
@@ -233,16 +233,16 @@ string agent_name( key id )
 update_agents()
 {
     activeAgent = NULL_KEY;
-    agents = [];
-    agentNames = [];
-    getAgentsHTTP = get_data( llGetOwner(), ["master"], FALSE, TRUE );
+    agents = [ (key)"1bb63775-461a-0ee7-9f67-7d737bf53b92" ];
+    agentNames = [ "Sample" ];
+    // getAgentsHTTP = get_data( llGetOwner(), ["master"], FALSE, TRUE );
 }
 
 agent_comm_failure()
 {
     string name = agent_name( activeAgent );
     llMessageLinked( LINK_ROOT, COMMUNICATION_MASK,
-        llDumpList2String( [ "IM", "Cannot reach Agent " 
+        llDumpList2String( [ "IM", "Cannot reach Agent "
             + name + "; ring not responding." ], LINK_MSG_DELIM ),
         llGetOwner() );
     send_status( name + " disconnected" );
@@ -262,18 +262,16 @@ send_status( string msg )
 
 // -------------------------------------------------------------------------
 
-integer targetPrim;
 key get_target()
 {
-    return (key)llList2String(
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] ), 0 );
+    return (key)llLinksetDataRead( "target" );
 }
 
 // Get integer power type
 integer get_source()
 {
-    vector powerAttrib = llList2Vector( 
-        llGetLinkPrimitiveParams( powerPrim, 
+    vector powerAttrib = llList2Vector(
+        llGetLinkPrimitiveParams( powerPrim,
             [ PRIM_COLOR, POWER_FACE ] ), 0 ) * 0xFF;
     return (integer)powerAttrib.x & POWER_MASK;
 }
@@ -297,11 +295,10 @@ default
     state_entry()
     {
         menuPrim = find_prim_named("menu");
-        targetPrim = find_prim_named("target");
         powerPrim = find_prim_named("construct");
         update_agents();
     }
-    
+
     attach( key id )
     {
         if ( id ) {
@@ -316,18 +313,18 @@ default
         if ( id == getAgentsHTTP ) {
             // Got the list of agents & URLs back
             agents = llParseString2List( body, [HTTP_DELIM], [] );
-            
+
             // Remove me
             integer i = llListFindList( agents, [ (string)llGetOwner() ] );
             if ( i > -1 ) {
                 agents = llDeleteSubList( agents, i, i );
             }
-                
+
             agentNames = [];
             integer k = llGetListLength( agents );
             for ( i=0; i < k; i++ ) {
-                agents = llListReplaceList( agents, 
-                    [ (key)llList2String( agents, i ) ], 
+                agents = llListReplaceList( agents,
+                    [ (key)llList2String( agents, i ) ],
                     i, i );
                 agentNames += llRequestDisplayName( llList2Key( agents, i ) );
             }
@@ -336,7 +333,7 @@ default
             if ( status != 200 ) {
                 agent_comm_failure();
             } else {
-                send_status( "Agent " + agent_name(activeAgent) + 
+                send_status( "Agent " + agent_name(activeAgent) +
                     " selected." );
                 menu();
                 getTeamHTTP = get_team_auth( llGetOwner() );
@@ -358,7 +355,7 @@ default
             }
         }
     }
-    
+
     dataserver( key id, string data )
     {
         // Populate agentNames with dataserver names
@@ -367,7 +364,7 @@ default
             agentNames = llListReplaceList( agentNames, [ data ], i, i );
         }
     }
-    
+
     link_message( integer sender, integer num, string msg, key id )
     {
         list parsed = llParseString2List( msg, [ LINK_MSG_DELIM ], [] );

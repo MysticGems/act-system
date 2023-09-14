@@ -194,6 +194,26 @@ rlv_ping()
         + (string)RLV_RESPONSE );
 }
 
+set_target( key target ) {
+    integer channel = key2channel( target );
+    llListenRemove( actHandle );
+    actHandle = llListen( channel, "", NULL_KEY, "" );
+    status = "";
+    if ( channel ) {
+        llSetLinkPrimitiveParamsFast( moralePrim, 
+            [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+        llSetLinkPrimitiveParamsFast( focusPrim, 
+            [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
+        llRegionSay( channel, (string)target + ":a!png" );
+        rlv = "";
+        if ( llGetAgentSize( target ) ) {
+            llSensorRepeat( "", target, AGENT, 20.0, PI, 5.0 );
+        }
+    } else {
+        target = NULL_KEY;
+    }
+}
+
 default
 {
     state_entry()
@@ -254,17 +274,23 @@ default
         
         // llOwnerSay( llGetLinkName( source ) );
         
-        if ( cmd == "trgt" ) {
-            target = (key)llList2String( parsed, 1 );
-            llSetObjectDesc( (string)target );
-            if ( target ) {
-                state tracking;
-            }
-        } else if ( cmd == "rset" ) {
+        if  ( cmd == "rset" ) {
             llResetScript();
         }
     }
     
+    linkset_data( integer action, string name, string value ) {
+        if ( action == LINKSETDATA_UPDATE ) {
+            if ( name == "target" ) {
+                target = (key)value;
+                set_target( target );
+                if ( target ) {
+                    state tracking;
+                }
+            }
+        }
+    }
+
     timer()
     {
         float now = llGetTime();
@@ -297,21 +323,7 @@ state tracking
             [ PRIM_COLOR, LIT_FACE ] ), 0 );
         llSetLinkPrimitiveParamsFast( targetProbe,
             [ PRIM_COLOR, ALL_SIDES, <0, 0, 0>, 0.4 ] );
-            
-        // Get Act! status, if present
-        integer channel = key2channel( target );
-        if ( channel ) {
-            actHandle = llListen( channel, "", NULL_KEY, "" );
-            llRegionSay( channel, (string)target + ":a!png" );
-            rlv = "";
-            status = "";
-            if ( llGetAgentSize( target ) ) {
-                llSensorRepeat( "", target, AGENT, 20.0, PI, 5.0 );
-            }
-        } else {
-            target = NULL_KEY;
-            state default;
-        }
+        set_target( target );
     }
     
     sensor( integer d )
@@ -396,34 +408,20 @@ state tracking
         
         // llOwnerSay( m );
         
-        if ( cmd == "trgt" ) {
-            target = (key)llList2String( parsed, 1 );
-            llSetObjectDesc( (string)target );
-            if ( target == NULL_KEY ) {
-                state default;
-            } else {
-                // Get Act! status, if present
-                integer channel = key2channel( target );
-                llListenRemove( actHandle );
-                actHandle = llListen( channel, "", NULL_KEY, "" );
-                status = "";
-                if ( channel ) {
-                    llSetLinkPrimitiveParamsFast( moralePrim, 
-                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
-                    llSetLinkPrimitiveParamsFast( focusPrim, 
-                        [ PRIM_TEXT, "", ZERO_VECTOR, 0.0 ] );
-                    llRegionSay( channel, (string)target + ":a!png" );
-                    rlv = "";
-                    if ( llGetAgentSize( target ) ) {
-                        llSensorRepeat( "", target, AGENT, 20.0, PI, 5.0 );
-                    }
-                } else {
-                    target = NULL_KEY;
+        if ( cmd == "rset" ) {
+            llResetScript();
+        }
+    }
+    
+    linkset_data( integer action, string name, string value ) {
+        if ( action == LINKSETDATA_UPDATE ) {
+            if ( name == "target" ) {
+                target = (key)value;
+                set_target( target );
+                if ( target == NULL_KEY ) {
                     state default;
                 }
             }
-        } else if ( cmd == "rset" ) {
-            llResetScript();
         }
     }
     
@@ -512,9 +510,12 @@ state tracking
                 key my_seat = llList2Key( 
                     llGetObjectDetails( llGetOwner(), [ OBJECT_ROOT ] ), 0 );
                 if ( my_seat == target_seat ) {
-                    name += "⨇";
+                    name += "h";
                 }
             }
+            if ( info & AGENT_AUTOMATED ) {
+                name += "⬣";
+            };
             if ( info & AGENT_MOUSELOOK ) {
                 name += "⚔";
             }
@@ -522,3 +523,10 @@ state tracking
         set_text( name + rlv);
     }
 }
+
+// This work is licensed under the Creative Commons 
+// Attribution-Noncommercial-Share Alike 3.0 United States License. 
+// To view a copy of this license, visit 
+// http://creativecommons.org/licenses/by-nc-sa/3.0/us/ 
+// or send a letter to Creative Commons, 171 Second Street, Suite 300, San 
+// Francisco, California, 94105, USA.

@@ -164,12 +164,7 @@ lockon()
 
 set_target( key id )
 {
-    target = id;
-    llSetLinkPrimitiveParamsFast( targetPrim,
-        [ PRIM_DESC, (string)id ] );
-    llMessageLinked( LINK_SET, BROADCAST_MASK, 
-        llDumpList2String( [ "trgt", id ], LINK_DELIM ),
-        llGetKey() );
+    llLinksetDataWrite( "target", id );
 }
 
 key get_seat( key id ) {

@@ -118,9 +118,7 @@ follow()
 
 key get_target()
 {
-    return (key)llList2String( 
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
-        , 0 );
+    return (key)llLinksetDataRead( "target" );
 }
 
 face( vector tpos )
@@ -425,8 +423,8 @@ default
         
         mass = llGetMass();
         
-        list prims = get_link_numbers( [ "trvl:cruise", "trvl:anchor", "menu",
-            "trvl:tocam", "trvl:follow", "target" ] );
+        list prims = get_link_numbers( [ "trvl^cruise", "trvl^anchor", "menu",
+            "trvl^tocam", "trvl^follow", "target" ] );
         cruisePrim = llList2Integer( prims, 0 );
         anchorPrim = llList2Integer( prims, 1 );
         menuPrim = llList2Integer( prims, 2 );
@@ -899,4 +897,3 @@ state pursuit
             LINK_DELIM ), llGetOwner() );
     }
 }
-

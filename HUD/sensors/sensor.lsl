@@ -10,6 +10,7 @@ integer SCAN_MASK           = 0x1000000;
 integer COMMUNICATION_MASK  = 0x10000000;
 integer LIT_FACE = 0;
 integer DIM_FACE = 2;
+float FAST_TIMER = 0.2;                         // Sec between camera updates
 
 integer VIEWER2 = TRUE;
 
@@ -67,7 +68,7 @@ cam_target()
     key targeted = get_target();
     if ( targeted ) {
         track_camera( targeted );
-        llSetTimerEvent( 0.05 );
+        llSetTimerEvent( FAST_TIMER );
     }
 }
 
@@ -108,6 +109,7 @@ track_camera( key id )
 
 suspend_camera()
 {
+    llSetTimerEvent( 0. );
     if( cammed == NULL_KEY ) return;
     llMessageLinked( comm, COMMUNICATION_MASK,
         llDumpList2String(
@@ -116,7 +118,6 @@ suspend_camera()
         llGetOwner() );
     cammed = NULL_KEY;
     llClearCameraParams();
-    llReleaseCamera(llGetOwner());
     set_lit( camPrim, FALSE );
 }
 
@@ -174,9 +175,7 @@ point_at( key id, integer start )
 
 key get_target()
 {
-    return (key)llList2String( 
-        llGetLinkPrimitiveParams( targetPrim, [ PRIM_DESC ] )
-        , 0 );
+    return (key)llLinksetDataRead( "target" );
 }
 
 set_lit( integer prim, integer on )
@@ -195,7 +194,6 @@ integer comm = LINK_ROOT;               // Where are the prims?
 integer status = LINK_ROOT;
 integer searchPrim;
 integer pointPrim;
-integer targetPrim;
 integer camPrim;
 key owner;
 
@@ -216,18 +214,18 @@ default
 {
     state_entry()
     {
-        list prims = get_link_numbers( [ "sens:point", "scan:filter",
-            "target", "sens:cam" ] );
+        list prims = get_link_numbers( [ "sens^point", "scan^filter",
+           "sens^cam" ] );
         pointPrim = llList2Integer( prims, 0 );
         searchPrim = llList2Integer( prims, 1 );
-        targetPrim = llList2Integer( prims, 2 );
-        camPrim = llList2Integer( prims, 3 );
+        camPrim = llList2Integer( prims, 2 );
         owner = llGetOwner();
         set_lit( pointPrim, FALSE );
         set_lit( searchPrim, FALSE );
         set_lit( camPrim, FALSE );
         llRequestPermissions( llGetOwner(), 
             PERMISSION_CONTROL_CAMERA | PERMISSION_TAKE_CONTROLS );
+        llClearCameraParams();
         //llWhisper( DEBUG_CHANNEL, llGetScriptName() + " initialized; " 
         //    + (string)llGetFreeMemory() + " bytes free." );
     }
@@ -282,6 +280,23 @@ default
             }
         }
     }
+    
+    linkset_data( integer action, string name, string value ) {
+        if ( action == LINKSETDATA_UPDATE ) {
+            if ( name == "target" ) {
+                if ( cammed ) {
+                    suspend_camera();
+                    cammed = NULL_KEY;
+                    cam_target();
+                }
+                if ( pointing ) {
+                    point_at( pointing, FALSE );
+                    pointing = NULL_KEY;
+                    point();
+                }
+            }
+        }
+    }    
     
     timer()
     {

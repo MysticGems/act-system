@@ -12,35 +12,24 @@ handle_commands( list cmds, key id ) {
     } else if ( msg == "unlock" ) {
         RL_header = "Unlock relay";
         send_command( victim, [ "@detach=y" ] );
+    } else if ( msg == "strip" ) {
+        string item = llList2String( cmds, 1 );
+        send_command( victim, [ "@remattach:" + item + "=force" ] );
+        llOwnerSay( "Trying to remove " + llKey2Name( (key)item ) );
     } else if ( msg == "stripmenu" ) {
-        list menu = [ "BACK" ] + STRIP_MENU;
-        list cmds = [llGetScriptName()] + STRIP_CMDS;
-        send_menu( "Strip " + llKey2Name( victim ), menu, 
-            cmds );
-    } else if ( msg == "notorso" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_TORSO );
-    } else if ( msg == "notop" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_TOP );
-    } else if ( msg == "notopboobs" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_PRIM_TITS );
-    } else if ( msg == "nopants" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_BOTTOM );
-    } else if ( msg == "nocuffs" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_CUFFS );
-    } else if ( msg == "noirons" ) {
-        RL_header = "MGS strip";
-        send_command( victim, STRIP_LEG_IRONS );
-    } else if ( msg == "noalpha" ) {
-        RL_header = "MGS dealpha";
-        send_command( victim, STRIP_ALPHA );
-    } else if ( msg == "notattoo" ) {
-        RL_header = "MGS no tattoo";
-        send_command( victim, STRIP_TATTOO );
+        list menu = [ "BACK" ];
+        list prompts = [llGetScriptName()];
+        list attachedsorted = llListSort(llGetAttachedList(victim),2,1);
+        integer i;
+        string item;
+        for( i=0; i<llGetListLength(attachedsorted);i++)
+        {
+            item = llKey2Name( llList2Key(attachedsorted, i) );
+            menu += [ item ];
+            prompts += [ "rlvc§strip§" + (string)llList2Key(attachedsorted, i) ];
+        }
+        send_menu( "Strip " + llKey2Name( victim ), menu, //llList2List( menu, 1, 5 ), 
+            prompts );
     } else if ( msg == "sit" ) {
         if ( object ) {
             RL_header = "MGS sit";
@@ -381,6 +370,23 @@ default
             }
         }
     }
+    
+    linkset_data( integer action, string name, string val ) {
+        if ( action == LINKSETDATA_UPDATE ) {
+            if ( name == "target" ) {
+                key who = (key)val;
+                if ( who ) {
+                    if ( (key)who ) {
+                        if ( llGetAgentSize( who ) ) {
+                            victim = who;
+                        } else {
+                            object = who;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     timer()
     {
@@ -389,4 +395,5 @@ default
         llSetTimerEvent( 0. );
     }
 }
-
+// Copyright ©2023 Jack Abraham and player, all rights reserved
+// Contact Guardian Karu in Second Life for distribution rights
