@@ -304,6 +304,7 @@ integer hungerPrim;
 string SOLID =   "▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮";
 string HOLLOW =  "▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯";
 string DAMAGED = "____________________";
+string SPACER = "                              ";
 integer MAX_TICKS = 15;
 vector ENDURANCE_COLOR = <0.3333, 1.0, 0.3333>;
 vector AROUSAL_COLOR = <1.0, 0.5, 0.5>;
@@ -321,13 +322,15 @@ set_bar_level( float current, float attrib, float max, integer prim, vector colo
     string bar;
     float ratio;
     float maximum;
-    attrib = (float)llFloor( attrib );
-    max = (float)llFloor( max );
+    attrib = llFloor( attrib );
+    integer att = (integer)attrib;
+    max = llFloor( max );
+    integer now = llFloor( current );
     
     if ( current < 0 ) current = 0.0;
     if ( attrib > 0 ) {
-        ratio = ( current / attrib );
-        maximum = ( max / attrib );
+        ratio = ( current / (float)attrib );
+        maximum = ( max / (float)attrib );
     }
     integer level = (integer)( ratio * (float)MAX_TICKS );
     integer limit = (integer)( maximum * (float)MAX_TICKS );
@@ -340,6 +343,12 @@ set_bar_level( float current, float attrib, float max, integer prim, vector colo
     if ( limit < MAX_TICKS ) {
         bar += llGetSubString( DAMAGED, 0, MAX_TICKS - limit - 1 );
     }
+    if ( line ) {
+        bar = (string)now + "/" + (string)att + SPACER + "\n" + bar + SPACER;
+    } else {
+        bar = SPACER + (string)now + "/" + (string)att + "\n" + SPACER + bar;
+    }
+    bar = bar + "\n ";
     llSetLinkPrimitiveParamsFast( prim, [ PRIM_TEXT, bar, color, 1.0 ] );
     // llSay( 0, llDumpList2String( [ current, attrib, max, level, limit ], "/" ) );
 }
@@ -470,26 +479,21 @@ default // Setup
         }
         //llOwnerSay( llGetScriptName() + " starting; " + (string)llGetFreeMemory()
         //    + " bytes free." );
-        if ( llGetAttached()  ) {
-            if ( llAgentInExperience( llGetOwner() ) ) {
-                if ( charKey == NULL_KEY ) {
-                    if ( defaultLicense != NULL_KEY ) {
-                        charName = defaultCharacter;
-                        charKey = (string)defaultLicense + "-Act!";
-                        charLevel = DEFAULT_LEVEL;
-                        charID = llReadKeyValue( charKey );
-                    } else {
-                        // Start polling for default license
-                        llSetTimerEvent( 5.0 );
-                    }
-                } else {
-                    charKey = (string)llGetOwner() + "-Act!";
-                    llOwnerSay( "Retrieving character sheet." );
+        if ( llGetAttached() ) {
+            if ( charKey == NULL_KEY ) {
+                if ( defaultLicense != NULL_KEY ) {
+                    charName = defaultCharacter;
+                    charKey = (string)defaultLicense + "-Act!";
+                    charLevel = DEFAULT_LEVEL;
                     charID = llReadKeyValue( charKey );
+                } else {
+                    // Start polling for default license
+                    llSetTimerEvent( 5.0 );
                 }
             } else {
-                llOwnerSay( "Your experience is not active here. Please reattach your HUD when you are in an area that allows the experience." );
-                llRequestPermissions( llGetOwner(), PERMISSION_ATTACH );
+                charKey = (string)llGetOwner() + "-Act!";
+                llOwnerSay( "Retrieving character sheet." );
+                charID = llReadKeyValue( charKey );
             }
         }
     }
@@ -708,7 +712,7 @@ state active
                 if ( cmd == "char" ) {
                     llSetObjectDesc( defaultCharacter );
                     charKey = llGetKey();
-                    llSay( 0, "Character sheet reload by " +
+                    llOwnerSay( "Character sheet reload by " +
                         llGetDisplayName(llGetOwner()) + "." ); 
                     state default;
                 } else if ( cmd == "stat" ) {
