@@ -16,3 +16,7 @@ This project is still pre-release.
 --
 
 Second Life® is a trademark of Linden Research, Inc. Nothing here is affiliated with or sponsored by Linden Research
+
+-- 
+
+Nothing in this repository may be used for "AI" research, development, training, or testing.
